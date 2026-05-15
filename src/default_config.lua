@@ -1,0 +1,31 @@
+-- batto configuration
+-- Edit this file to customize batto.
+
+-- batto.setup({
+--   window = {
+--     width = 600,
+--     list_height = 300,
+--     icon_size = 48,
+--     show_name = true,   -- show app name below icon
+--   },
+--   keys = {
+--     accept = "enter",
+--     close = "escape",
+--     up = "up",
+--     down = "down",
+--     tab_complete = "tab",
+--   },
+-- })
+
+-- Example command (type / to enter command mode):
+-- batto.command({
+--   name = "search",
+--   description = "Search the web",
+--   args = {
+--     { name = "query", required = true, type = "string" },
+--   },
+--   exec = "xdg-open 'https://google.com/search?q={{args}}'",
+-- })
+
+-- Plugins:
+-- batto.use("plugins/my_plugin")
