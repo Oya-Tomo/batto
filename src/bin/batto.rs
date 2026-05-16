@@ -17,7 +17,7 @@ fn main() {
 
     Application::new().run(move |cx: &mut App| {
         let width = cfg.window.width as f32;
-        let height = cfg.window.list_height as f32 + cfg.window.icon_size as f32 + 120.0;
+        let height = cfg.window.list_height as f32 + 92.0;
 
         let _ = cx.open_window(
             WindowOptions {

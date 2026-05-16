@@ -4,6 +4,8 @@ use crate::config::types::{AppConfig, UserCommand};
 use crate::discovery::types::AppEntry;
 use crate::search::fuzzy::fuzzy_match;
 
+const SEARCH_BAR_HEIGHT: f32 = 44.0;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Mode {
     App,
@@ -107,6 +109,55 @@ impl BattoApp {
             ""
         }
     }
+
+    fn grid_columns(&self) -> usize {
+        let icon_size = self.config.window.icon_size as f32;
+        let cell_width = icon_size + 24.0; // icon + padding
+        let window_width = self.config.window.width as f32 - 32.0; // minus horizontal padding
+        ((window_width / cell_width).floor() as usize).max(1)
+    }
+
+    fn move_up(&mut self) {
+        if self.mode == Mode::App {
+            let cols = self.grid_columns();
+            if self.selected_index >= cols {
+                self.selected_index -= cols;
+            }
+        } else if self.selected_index > 0 {
+            self.selected_index -= 1;
+        }
+    }
+
+    fn move_down(&mut self) {
+        let max = match self.mode {
+            Mode::App => self.filtered_apps.len(),
+            Mode::Command => self.filtered_commands.len(),
+        };
+        if self.mode == Mode::App {
+            let cols = self.grid_columns();
+            if self.selected_index + cols < max {
+                self.selected_index += cols;
+            }
+        } else if self.selected_index + 1 < max {
+            self.selected_index += 1;
+        }
+    }
+
+    fn move_left(&mut self) {
+        if self.selected_index > 0 {
+            self.selected_index -= 1;
+        }
+    }
+
+    fn move_right(&mut self) {
+        let max = match self.mode {
+            Mode::App => self.filtered_apps.len(),
+            Mode::Command => self.filtered_commands.len(),
+        };
+        if self.selected_index + 1 < max {
+            self.selected_index += 1;
+        }
+    }
 }
 
 fn notify_daemon_launch(name: &str) {
@@ -147,36 +198,24 @@ impl Render for BattoApp {
                         "escape" => cx.quit(),
                         "enter" => this.launch_selected(cx),
                         "up" => {
-                            if this.selected_index > 0 {
-                                this.selected_index -= 1;
-                                cx.notify();
-                            }
+                            this.move_up();
+                            cx.notify();
                         }
                         "down" => {
-                            let max = match this.mode {
-                                Mode::App => this.filtered_apps.len(),
-                                Mode::Command => this.filtered_commands.len(),
-                            };
-                            if this.selected_index + 1 < max {
-                                this.selected_index += 1;
-                                cx.notify();
-                            }
+                            this.move_down();
+                            cx.notify();
                         }
-                        "left" if this.mode == Mode::App => {
-                            if this.selected_index > 0 {
-                                this.selected_index -= 1;
-                                cx.notify();
-                            }
+                        "left" => {
+                            this.move_left();
+                            cx.notify();
                         }
-                        "right" if this.mode == Mode::App => {
-                            if this.selected_index + 1 < this.filtered_apps.len() {
-                                this.selected_index += 1;
-                                cx.notify();
-                            }
+                        "right" => {
+                            this.move_right();
+                            cx.notify();
                         }
                         "backspace" => {
                             this.query.pop();
-                            if !this.query.starts_with('/') {
+                            if !this.query.starts_with('/') && this.mode == Mode::Command {
                                 this.mode = Mode::App;
                             }
                             this.update_results();
@@ -184,7 +223,10 @@ impl Render for BattoApp {
                         }
                         _ => {
                             if let Some(ch) = event.keystroke.key_char.as_ref() {
-                                if ch == "/" && this.query.is_empty() && !this.all_commands.is_empty() {
+                                if ch == "/"
+                                    && this.query.is_empty()
+                                    && !this.all_commands.is_empty()
+                                {
                                     this.mode = Mode::Command;
                                     this.query.push('/');
                                     this.update_results();
@@ -201,8 +243,13 @@ impl Render for BattoApp {
             ))
             .child(render_search_bar(&query, mode))
             .child(match mode {
-                Mode::App => render_icon_row(filtered_apps, selected, icon_size, show_name).into_any_element(),
-                Mode::Command => render_command_list(filtered_commands, selected).into_any_element(),
+                Mode::App => {
+                    render_app_grid(filtered_apps, selected, icon_size, show_name)
+                        .into_any_element()
+                }
+                Mode::Command => {
+                    render_command_list(filtered_commands, selected).into_any_element()
+                }
             })
     }
 }
@@ -210,7 +257,8 @@ impl Render for BattoApp {
 fn render_search_bar(query: &str, mode: Mode) -> Div {
     div()
         .w_full()
-        .h(px(44.0))
+        .h(px(SEARCH_BAR_HEIGHT))
+        .flex_shrink_0()
         .px(px(16.0))
         .border_b_1()
         .border_color(rgb(0x313244))
@@ -222,7 +270,10 @@ fn render_search_bar(query: &str, mode: Mode) -> Div {
                 .text_color(rgb(0x585b70))
                 .text_size(px(16.0))
         } else if mode == Mode::Command {
-            div().child(query[1..].to_string()).text_color(rgb(0xcdd6f4)).text_size(px(16.0))
+            div()
+                .child(query[1..].to_string())
+                .text_color(rgb(0xcdd6f4))
+                .text_size(px(16.0))
         } else {
             div()
                 .child(query.to_string())
@@ -231,29 +282,32 @@ fn render_search_bar(query: &str, mode: Mode) -> Div {
         })
 }
 
-fn render_icon_row(apps: &[AppEntry], selected: usize, icon_size: f32, show_name: bool) -> impl IntoElement {
+fn render_app_grid(
+    apps: &[AppEntry],
+    selected: usize,
+    icon_size: f32,
+    show_name: bool,
+) -> impl IntoElement {
     div()
-        .id("icon-row")
+        .id("app-grid")
         .flex_1()
         .w_full()
-        .overflow_x_scroll()
-        .flex()
-        .items_start()
+        .overflow_y_scroll()
         .px(px(16.0))
-        .py(px(16.0))
-        .gap(px(12.0))
+        .py(px(12.0))
         .children(apps.iter().enumerate().map(|(i, entry)| {
             let is_selected = i == selected;
-            let mut col = div()
-                .flex_shrink_0()
-                .w(px(icon_size + 16.0))
+            let mut cell = div()
+                .w_full()
+                .h(px(icon_size + 12.0))
+                .px(px(8.0))
                 .flex()
-                .flex_col()
                 .items_center()
-                .gap(px(4.0));
+                .gap(px(12.0))
+                .rounded(px(6.0));
 
             if is_selected {
-                col = col.bg(rgb(0x313244)).rounded(px(8.0)).p(px(4.0));
+                cell = cell.bg(rgb(0x313244));
             }
 
             let icon = if let Some(ref path) = entry.icon_path {
@@ -264,41 +318,34 @@ fn render_icon_row(apps: &[AppEntry], selected: usize, icon_size: f32, show_name
             } else {
                 div()
                     .size(px(icon_size))
-                    .rounded(px(8.0))
+                    .rounded(px(6.0))
                     .bg(rgb(0x45475a))
                     .flex()
                     .items_center()
                     .justify_center()
-                    .child(
-                        entry
-                            .name
-                            .chars()
-                            .next()
-                            .unwrap_or('?')
-                            .to_string(),
-                    )
+                    .child(entry.name.chars().next().unwrap_or('?').to_string())
                     .text_color(rgb(0xcdd6f4))
                     .text_size(px(icon_size * 0.4))
                     .into_any_element()
             };
-            col = col.child(icon);
+
+            cell = cell.child(icon);
 
             if show_name {
-                col = col.child(
+                cell = cell.child(
                     div()
-                        .max_w(px(icon_size + 16.0))
                         .child(entry.name.clone())
-                        .text_size(px(10.0))
                         .text_color(if is_selected {
                             rgb(0xcdd6f4)
                         } else {
                             rgb(0xa6adc8)
                         })
+                        .text_size(px(13.0))
                         .overflow_hidden(),
                 );
             }
 
-            col
+            cell
         }))
 }
 
@@ -333,6 +380,10 @@ fn render_command_list(commands: &[UserCommand], selected: usize) -> impl IntoEl
                         })
                         .text_size(px(13.0)),
                 );
-            if is_selected { el.bg(rgb(0x313244)) } else { el }
+            if is_selected {
+                el.bg(rgb(0x313244))
+            } else {
+                el
+            }
         }))
 }
