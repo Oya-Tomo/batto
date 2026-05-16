@@ -2,27 +2,186 @@
 
 Raycast-like application launcher for Linux, built with Rust and GPUI.
 
-## Quick Start
+## Features
+
+- GPU-accelerated UI with fuzzy search
+- Desktop application discovery with icons
+- Slash commands with argument forms
+- Plugin system (Lua)
+- Calculator mode (`=2+3`)
+- Dynamic query handlers (`batto.on_query`)
+- Japanese/IME input support
+- Configurable keybindings
+
+## Requirements
+
+- Linux (X11 / Wayland)
+- Rust (latest stable)
+- curl (for plugin HTTP features)
+
+## Install
+
+```bash
+make install
+```
+
+This builds the release binary, installs `batto` and `battod` to `/usr/local/bin`, and sets up the systemd user service.
+
+To install to a different prefix:
+
+```bash
+make install PREFIX=~/.local
+```
+
+## Enable the daemon
+
+```bash
+make enable
+```
+
+This enables and starts `battod` as a systemd user service. The daemon will auto-start on login.
+
+## Set up a hotkey
+
+### GNOME
+
+```bash
+gsettings set org.gnome.settings-daemon.plugins.media-keys custom-keybindings \
+  "['/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/']"
+
+gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/ \
+  name 'batto'
+
+gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/ \
+  command '/usr/local/bin/batto'
+
+gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/ \
+  binding '<Super>space'
+```
+
+### i3 / Sway
 
 ```
-cargo build --release
-```
-
-Two binaries are produced:
-
-- `target/release/batto` — the GUI client
-- `target/release/battod` — the background daemon
-
-Install both somewhere in your `$PATH`, then bind `batto` to a global keybinding:
-
-```
-# i3/Sway example
 bindsym $mod+d exec batto
 ```
 
-That's it. On first run, `batto` auto-starts the daemon and generates a default config at `~/.config/batto/init.lua`.
+### Hyprland
 
-## Documentation
+```
+bind = SUPER, space, exec, batto
+```
 
-- [Usage guide](docs/usage.md) — keybindings, modes, configuration, commands
-- [Architecture](docs/architecture.md) — daemon/client design, project structure, modules
+## Uninstall
+
+```bash
+make uninstall
+```
+
+Stops the service and removes binaries and the service unit.
+
+## Configuration
+
+Config file: `~/.config/batto/init.lua`
+
+```lua
+batto.setup({
+  window = {
+    width = 600,
+    list_height = 300,
+    icon_size = 48,
+  },
+  keys = {
+    accept = "enter",
+    close = "escape",
+    up = "ctrl+k",
+    down = "ctrl+j",
+    tab_complete = "tab",
+  },
+})
+```
+
+Keybindings use `modifier+key` format: `ctrl+j`, `ctrl+k`, `alt+p`, `shift+tab`, etc.
+
+## Plugins
+
+Place plugins in `~/.config/batto/plugins/<name>/init.lua` and enable them:
+
+```lua
+batto.use("discord")
+```
+
+### Plugin API
+
+**Register a command:**
+
+```lua
+batto.command({
+  name = "hello",
+  description = "Say hello",
+  args = {
+    { name = "target", required = true, type = "string" },
+    {
+      name = "greeting",
+      type = "literal",
+      choices = {
+        { name = "Hello", value = "hello" },
+        { name = "Hi", value = "hi" },
+      },
+    },
+  },
+  exec = "echo '{{greeting}} {{target}}'",
+})
+```
+
+Argument types: `string`, `literal` (selectable from choices).
+
+**Dynamic query handler:**
+
+```lua
+batto.on_query({
+  prefix = "gg",
+  description = "Google search",
+  handler = function(query)
+    return {
+      { title = "Search: " .. query,
+        exec = "xdg-open 'https://google.com/search?q=" .. query .. "'" },
+    }
+  end,
+})
+```
+
+**HTTP request:**
+
+```lua
+local body = batto.fetch("https://api.example.com/data")
+local body = batto.fetch("https://api.example.com/data", {
+  method = "POST",
+  headers = { ["Content-Type"] = "application/json" },
+  body = '{"key": "value"}',
+})
+```
+
+**JSON and env:**
+
+```lua
+local data = batto.json_decode(body)
+local json = batto.json_encode({ key = "value" })
+local token = batto.env("MY_API_TOKEN")
+```
+
+## Usage
+
+| Action | How |
+|--------|-----|
+| Open launcher | Run `batto` (bind to a hotkey) |
+| Search apps | Type a query |
+| Accept result | Enter |
+| Close | Escape |
+| Navigate list | Ctrl+J / Ctrl+K (configurable) |
+| Tab complete | Tab |
+| Slash command | Type `/` then command name |
+| Calculator | Type `=` then an expression |
+
+## License
+
+MIT
