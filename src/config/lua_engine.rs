@@ -1,11 +1,10 @@
 use mlua::{Lua, LuaSerdeExt, Table};
 
-use super::types::{AppConfig, ArgChoice, CommandArg, QueryHandlerInfo, QueryResult, UserCommand};
+use super::types::{AppConfig, ArgChoice, CommandArg, QueryResult, UserCommand};
 
 pub struct LuaOutput {
     pub config: AppConfig,
     pub commands: Vec<UserCommand>,
-    pub query_handlers: Vec<QueryHandlerInfo>,
 }
 
 pub struct LuaRuntime {
@@ -34,37 +33,68 @@ impl LuaRuntime {
         &self.output
     }
 
-    pub fn query(&self, prefix: &str, text: &str) -> Vec<QueryResult> {
-        let handlers: Table = match self.lua.globals().get::<Table>("_batto_query_handlers") {
+    pub fn query(&self, name: &str, text: &str) -> Vec<QueryResult> {
+        let handlers: Table = match self.lua.globals().get::<Table>("_batto_handlers") {
             Ok(t) => t,
             Err(_) => return Vec::new(),
         };
 
-        for pair in handlers.sequence_values::<Table>() {
-            let Ok(t) = pair else { continue };
-            let Ok(p) = t.get::<String>("prefix") else { continue };
-            if p != prefix {
-                continue;
+        let Ok(handler) = handlers.get::<mlua::Function>(name) else {
+            return Vec::new();
+        };
+
+        match handler.call::<Table>(text) {
+            Ok(results) => {
+                let mut out = Vec::new();
+                for item in results.sequence_values::<Table>() {
+                    let Ok(item) = item else { continue };
+                    let title: String = item.get("title").unwrap_or_default();
+                    let exec: String = item.get("exec").unwrap_or_default();
+                    out.push(QueryResult { title, exec });
+                }
+                out
             }
-            let Ok(handler) = t.get::<mlua::Function>("handler") else { continue };
-            match handler.call::<Table>(text) {
-                Ok(results) => {
-                    let mut out = Vec::new();
-                    for item in results.sequence_values::<Table>() {
-                        let Ok(item) = item else { continue };
-                        let title: String = item.get("title").unwrap_or_default();
-                        let exec: String = item.get("exec").unwrap_or_default();
-                        out.push(QueryResult { title, exec });
-                    }
-                    return out;
-                }
-                Err(e) => {
-                    eprintln!("batto on_query({prefix}): {e}");
-                    return Vec::new();
-                }
+            Err(e) => {
+                eprintln!("batto handler({name}): {e}");
+                Vec::new()
             }
         }
-        Vec::new()
+    }
+
+    pub fn exec_handler(&self, name: &str, args: &std::collections::HashMap<String, String>) -> Vec<QueryResult> {
+        let handlers: Table = match self.lua.globals().get::<Table>("_batto_handlers") {
+            Ok(t) => t,
+            Err(_) => return Vec::new(),
+        };
+
+        let Ok(handler) = handlers.get::<mlua::Function>(name) else {
+            return Vec::new();
+        };
+
+        let lua_args = match self.lua.create_table() {
+            Ok(t) => t,
+            Err(_) => return Vec::new(),
+        };
+        for (k, v) in args {
+            let _ = lua_args.set(k.clone(), v.clone());
+        }
+
+        match handler.call::<Table>(lua_args) {
+            Ok(results) => {
+                let mut out = Vec::new();
+                for item in results.sequence_values::<Table>() {
+                    let Ok(item) = item else { continue };
+                    let title: String = item.get("title").unwrap_or_default();
+                    let exec: String = item.get("exec").unwrap_or_default();
+                    out.push(QueryResult { title, exec });
+                }
+                out
+            }
+            Err(e) => {
+                eprintln!("batto exec_handler({name}): {e}");
+                Vec::new()
+            }
+        }
     }
 
     pub fn reload(&mut self, config_path: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
@@ -194,7 +224,8 @@ fn register_batto_apis(lua: &Lua, batto_table: &Table) -> Result<(), Box<dyn std
         lua.create_function(|lua, args: Table| {
             let name: String = args.get("name")?;
             let description: String = args.get("description").unwrap_or_default();
-            let exec: String = args.get("exec")?;
+            let exec: String = args.get("exec").unwrap_or_default();
+            let has_handler = args.get::<mlua::Function>("handler").is_ok();
 
             let lua_args: Vec<CommandArg> = match args.get::<Table>("args") {
                 Ok(args_table) => {
@@ -229,47 +260,27 @@ fn register_batto_apis(lua: &Lua, batto_table: &Table) -> Result<(), Box<dyn std
                 .get::<Table>("_batto_commands")
                 .unwrap_or_else(|_| lua.create_table().unwrap());
             let idx = commands.raw_len() + 1;
-            commands.set(idx, lua.to_value(&UserCommand {
-                name,
-                description,
-                args: lua_args,
-                exec,
-            })?)?;
+
+            // Store the command metadata
+            let cmd_table = lua.create_table()?;
+            cmd_table.set("name", name.clone())?;
+            cmd_table.set("description", description.clone())?;
+            cmd_table.set("args", lua.to_value(&lua_args)?)?;
+            cmd_table.set("exec", exec.clone())?;
+            cmd_table.set("has_handler", has_handler)?;
+
+            // If handler function is provided, store it in the handlers table
+            if let Ok(handler) = args.get::<mlua::Function>("handler") {
+                let handlers: Table = lua
+                    .globals()
+                    .get::<Table>("_batto_handlers")
+                    .unwrap_or_else(|_| lua.create_table().unwrap());
+                handlers.set(name.clone(), handler)?;
+                lua.globals().set("_batto_handlers", handlers)?;
+            }
+
+            commands.set(idx, cmd_table)?;
             lua.globals().set("_batto_commands", commands)?;
-            Ok(())
-        })?,
-    )?;
-
-    batto_table.set(
-        "on_query",
-        lua.create_function(|lua, args: Table| {
-            let prefix: String = args.get("prefix")?;
-            let description: String = args.get("description").unwrap_or_default();
-            let handler: mlua::Function = args.get("handler")?;
-
-            let handlers: Table = lua
-                .globals()
-                .get::<Table>("_batto_query_handlers")
-                .unwrap_or_else(|_| lua.create_table().unwrap());
-            let idx = handlers.raw_len() + 1;
-
-            let entry = lua.create_table()?;
-            entry.set("prefix", prefix.clone())?;
-            entry.set("description", description.clone())?;
-            entry.set("handler", handler)?;
-            handlers.set(idx, entry)?;
-
-            lua.globals().set("_batto_query_handlers", handlers)?;
-
-            // Also store metadata in a separate table for easy extraction
-            let meta: Table = lua
-                .globals()
-                .get::<Table>("_batto_query_meta")
-                .unwrap_or_else(|_| lua.create_table().unwrap());
-            let mi = meta.raw_len() + 1;
-            meta.set(mi, lua.to_value(&QueryHandlerInfo { prefix, description })?)?;
-            lua.globals().set("_batto_query_meta", meta)?;
-
             Ok(())
         })?,
     )?;
@@ -318,31 +329,45 @@ fn extract_output(lua: &Lua, globals: &mlua::Table) -> Result<LuaOutput, Box<dyn
 
     let commands = if let Ok(tbl) = globals.get::<Table>("_batto_commands") {
         let mut cmds = Vec::new();
-        for pair in tbl.sequence_values::<mlua::Value>() {
-            if let Ok(val) = pair {
-                if let Ok(cmd) = lua.from_value(val) {
-                    cmds.push(cmd);
+        for pair in tbl.sequence_values::<Table>() {
+            let Ok(t) = pair else { continue };
+            let name: String = t.get("name").unwrap_or_default();
+            let description: String = t.get("description").unwrap_or_default();
+            let exec: String = t.get("exec").unwrap_or_default();
+            let has_handler: bool = t.get("has_handler").unwrap_or(false);
+            let args: Vec<CommandArg> = match t.get::<Table>("args") {
+                Ok(at) => {
+                    let mut cmd_args = Vec::new();
+                    for arg_pair in at.sequence_values::<Table>() {
+                        let Ok(at2) = arg_pair else { continue };
+                        let choices: Vec<ArgChoice> = match at2.get::<Table>("choices") {
+                            Ok(ct) => ct.sequence_values::<Table>()
+                                .filter_map(|c| c.ok())
+                                .filter_map(|c| {
+                                    let n: String = c.get("name").ok()?;
+                                    let v: String = c.get("value").ok()?;
+                                    Some(ArgChoice { name: n, value: v })
+                                })
+                                .collect(),
+                            Err(_) => Vec::new(),
+                        };
+                        cmd_args.push(CommandArg {
+                            name: at2.get("name").unwrap_or_default(),
+                            required: at2.get("required").unwrap_or(false),
+                            arg_type: at2.get("type").unwrap_or_else(|_| "string".to_string()),
+                            choices,
+                        });
+                    }
+                    cmd_args
                 }
-            }
+                Err(_) => Vec::new(),
+            };
+            cmds.push(UserCommand { name, description, args, exec, has_handler });
         }
         cmds
     } else {
         Vec::new()
     };
 
-    let query_handlers = if let Ok(tbl) = globals.get::<Table>("_batto_query_meta") {
-        let mut handlers = Vec::new();
-        for pair in tbl.sequence_values::<mlua::Value>() {
-            if let Ok(val) = pair {
-                if let Ok(h) = lua.from_value(val) {
-                    handlers.push(h);
-                }
-            }
-        }
-        handlers
-    } else {
-        Vec::new()
-    };
-
-    Ok(LuaOutput { config, commands, query_handlers })
+    Ok(LuaOutput { config, commands })
 }

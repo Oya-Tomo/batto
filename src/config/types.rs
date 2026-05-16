@@ -31,7 +31,10 @@ pub struct UserCommand {
     pub description: String,
     #[serde(default)]
     pub args: Vec<CommandArg>,
+    #[serde(default)]
     pub exec: String,
+    #[serde(default)]
+    pub has_handler: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -53,12 +56,6 @@ pub struct ArgChoice {
 
 fn default_arg_type() -> String {
     "string".to_string()
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct QueryHandlerInfo {
-    pub prefix: String,
-    pub description: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

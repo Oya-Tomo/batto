@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::config::lua_engine::LuaRuntime;
-use crate::config::types::{AppConfig, QueryHandlerInfo, UserCommand};
+use crate::config::types::{AppConfig, UserCommand};
 use crate::discovery::types::AppEntry;
 
 fn runtime_dir() -> PathBuf {
@@ -130,7 +130,6 @@ pub struct DaemonData {
     pub config: AppConfig,
     pub apps: Vec<AppEntry>,
     pub commands: Vec<UserCommand>,
-    pub query_handlers: Vec<QueryHandlerInfo>,
 }
 
 pub fn request_all() -> Result<DaemonData, String> {
@@ -147,13 +146,29 @@ pub fn request_all() -> Result<DaemonData, String> {
     serde_json::from_slice(&buf).map_err(|e| e.to_string())
 }
 
-pub fn request_query(prefix: &str, query: &str) -> Result<Vec<crate::config::types::QueryResult>, String> {
+pub fn request_query(name: &str, query: &str) -> Result<Vec<crate::config::types::QueryResult>, String> {
     let mut stream = UnixStream::connect(socket_path()).map_err(|e| e.to_string())?;
     stream
         .set_read_timeout(Some(Duration::from_secs(5)))
         .map_err(|e| e.to_string())?;
 
-    let msg = format!("query:{prefix}:{query}");
+    let msg = format!("query:{name}:{query}");
+    stream.write_all(msg.as_bytes()).map_err(|e| e.to_string())?;
+
+    let mut buf = Vec::new();
+    stream.read_to_end(&mut buf).map_err(|e| e.to_string())?;
+
+    serde_json::from_slice(&buf).map_err(|e| e.to_string())
+}
+
+pub fn request_exec_handler(name: &str, args: &std::collections::HashMap<String, String>) -> Result<Vec<crate::config::types::QueryResult>, String> {
+    let mut stream = UnixStream::connect(socket_path()).map_err(|e| e.to_string())?;
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .map_err(|e| e.to_string())?;
+
+    let json_args = serde_json::to_string(args).unwrap_or_default();
+    let msg = format!("exec_handler:{name}:{json_args}");
     stream.write_all(msg.as_bytes()).map_err(|e| e.to_string())?;
 
     let mut buf = Vec::new();
@@ -186,7 +201,6 @@ pub fn run_daemon() {
         config: output.config.clone(),
         apps,
         commands: output.commands.clone(),
-        query_handlers: output.query_handlers.clone(),
     };
     let cache_path = dir.join("cache.json");
     if let Ok(json) = serde_json::to_string(&data) {
@@ -227,7 +241,6 @@ pub fn run_daemon() {
                     config: out.config.clone(),
                     apps: new_apps,
                     commands: out.commands.clone(),
-                    query_handlers: out.query_handlers.clone(),
                 };
                 if let Ok(json) = serde_json::to_string(&data) {
                     let _ = std::fs::write(&cache_path, &json);
@@ -258,7 +271,6 @@ pub fn run_daemon() {
                                 config: out.config.clone(),
                                 apps: new_apps,
                                 commands: out.commands.clone(),
-                                query_handlers: out.query_handlers.clone(),
                             };
                             if let Ok(json) = serde_json::to_string(&data) {
                                 let _ = std::fs::write(&cache_path, &json);
@@ -270,9 +282,20 @@ pub fn run_daemon() {
                         save_history(&history);
                         let _ = stream.write_all(b"ok");
                     } else if let Some(rest) = cmd.strip_prefix("query:") {
-                        // Format: query:<prefix>:<text>
-                        let (prefix, text) = rest.split_once(':').unwrap_or((rest, ""));
-                        let results = lua_runtime.query(prefix, text);
+                        // Format: query:<name>:<text>
+                        let (name, text) = rest.split_once(':').unwrap_or((rest, ""));
+                        let results = lua_runtime.query(name, text);
+                        if let Ok(json) = serde_json::to_string(&results) {
+                            let _ = stream.write_all(json.as_bytes());
+                        } else {
+                            let _ = stream.write_all(b"[]");
+                        }
+                    } else if let Some(rest) = cmd.strip_prefix("exec_handler:") {
+                        // Format: exec_handler:<name>:<json_args>
+                        let (name, json_args) = rest.split_once(':').unwrap_or((rest, "{}"));
+                        let args: std::collections::HashMap<String, String> =
+                            serde_json::from_str(json_args).unwrap_or_default();
+                        let results = lua_runtime.exec_handler(name, &args);
                         if let Ok(json) = serde_json::to_string(&results) {
                             let _ = stream.write_all(json.as_bytes());
                         } else {

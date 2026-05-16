@@ -1,7 +1,7 @@
 use gpui::*;
 use std::ops::Range;
 
-use crate::config::types::{AppConfig, CommandArg, KeyPressInfo, QueryHandlerInfo, QueryResult, UserCommand};
+use crate::config::types::{AppConfig, CommandArg, KeyPressInfo, QueryResult, UserCommand};
 use crate::discovery::types::AppEntry;
 use crate::search::fuzzy::fuzzy_match;
 
@@ -23,9 +23,8 @@ pub struct BattoApp {
     filtered_commands: Vec<UserCommand>,
     all_apps: Vec<AppEntry>,
     all_commands: Vec<UserCommand>,
-    query_handlers: Vec<QueryHandlerInfo>,
     query_results: Vec<QueryResult>,
-    active_query_prefix: Option<String>,
+    active_handler_cmd: Option<String>,
     focus_handle: FocusHandle,
     config: AppConfig,
     calc_result: Option<String>,
@@ -43,7 +42,6 @@ impl BattoApp {
         config: AppConfig,
         all_apps: Vec<AppEntry>,
         all_commands: Vec<UserCommand>,
-        query_handlers: Vec<QueryHandlerInfo>,
         focus_handle: FocusHandle,
     ) -> Self {
         let filtered_apps = all_apps.clone();
@@ -56,9 +54,8 @@ impl BattoApp {
             filtered_commands: all_commands.clone(),
             all_apps,
             all_commands,
-            query_handlers,
             query_results: Vec::new(),
-            active_query_prefix: None,
+            active_handler_cmd: None,
             focus_handle,
             config,
             calc_result: None,
@@ -82,24 +79,25 @@ impl BattoApp {
             }
             Mode::Command => {
                 let search = self.search_term().to_string();
-                // Check if query matches an on_query handler prefix
-                let matched_prefix = self.query_handlers.iter().find(|h| {
-                    search.starts_with(&h.prefix) &&
-                        (search.len() == h.prefix.len() || search.as_bytes().get(h.prefix.len()) == Some(&b' '))
+                // Check if query matches a handler command (no args, has_handler)
+                let matched_cmd = self.all_commands.iter().find(|c| {
+                    c.has_handler && c.args.is_empty() &&
+                        search.starts_with(&c.name) &&
+                        (search.len() == c.name.len() || search.as_bytes().get(c.name.len()) == Some(&b' '))
                 });
-                if let Some(handler) = matched_prefix {
-                    let query_text = if search.len() > handler.prefix.len() {
-                        &search[handler.prefix.len() + 1..]
+                if let Some(cmd) = matched_cmd {
+                    let query_text = if search.len() > cmd.name.len() {
+                        &search[cmd.name.len() + 1..]
                     } else {
                         ""
                     };
-                    let prefix = handler.prefix.clone();
-                    self.query_results = crate::daemon::request_query(&prefix, query_text)
+                    let name = cmd.name.clone();
+                    self.query_results = crate::daemon::request_query(&name, query_text)
                         .unwrap_or_default();
-                    self.active_query_prefix = Some(prefix);
+                    self.active_handler_cmd = Some(name);
                     self.filtered_commands.clear();
                 } else {
-                    self.active_query_prefix = None;
+                    self.active_handler_cmd = None;
                     self.query_results.clear();
                     let search_lower = search.to_lowercase();
                     self.filtered_commands = if search_lower.is_empty() {
@@ -179,7 +177,7 @@ impl BattoApp {
                 }
             }
             Mode::Command => {
-                if self.active_query_prefix.is_some() {
+                if self.active_handler_cmd.is_some() {
                     if let Some(result) = self.query_results.get(self.selected_index) {
                         let _ = std::process::Command::new("sh")
                             .arg("-c")
@@ -189,11 +187,27 @@ impl BattoApp {
                     }
                 } else if self.filling_args {
                     if let Some(cmd) = self.filtered_commands.first() {
-                        let exec = self.build_exec(cmd);
-                        let _ = std::process::Command::new("sh")
-                            .arg("-c")
-                            .arg(&exec)
-                            .spawn();
+                        if cmd.has_handler {
+                            let mut args = std::collections::HashMap::new();
+                            for (i, arg) in cmd.args.iter().enumerate() {
+                                let val = self.arg_values.get(i).cloned().unwrap_or_default();
+                                args.insert(arg.name.clone(), val);
+                            }
+                            let results = crate::daemon::request_exec_handler(&cmd.name, &args)
+                                .unwrap_or_default();
+                            if let Some(result) = results.first() {
+                                let _ = std::process::Command::new("sh")
+                                    .arg("-c")
+                                    .arg(&result.exec)
+                                    .spawn();
+                            }
+                        } else {
+                            let exec = self.build_exec(cmd);
+                            let _ = std::process::Command::new("sh")
+                                .arg("-c")
+                                .arg(&exec)
+                                .spawn();
+                        }
                         cx.quit();
                     }
                 } else if let Some(cmd) = self.filtered_commands.get(self.selected_index) {
@@ -296,7 +310,7 @@ impl BattoApp {
         let max = match self.mode {
             Mode::App => self.filtered_apps.len(),
             Mode::Command => {
-                if self.active_query_prefix.is_some() {
+                if self.active_handler_cmd.is_some() {
                     self.query_results.len()
                 } else {
                     self.filtered_commands.len()
@@ -337,7 +351,7 @@ impl Render for BattoApp {
         let filtered_apps = &self.filtered_apps;
         let filtered_commands = &self.filtered_commands;
         let calc_result = self.calc_result.clone();
-        let active_query_prefix = self.active_query_prefix.clone();
+        let active_handler_cmd = self.active_handler_cmd.clone();
         let query_results = &self.query_results;
         let filling_args = self.filling_args;
         let active_arg_index = self.active_arg_index;
@@ -468,12 +482,12 @@ impl Render for BattoApp {
                                 this.filtered_apps.get(this.selected_index).map(|a| a.name.clone())
                             }
                             Mode::Command => {
-                                if this.active_query_prefix.is_none() {
+                                if this.active_handler_cmd.is_none() {
                                     this.filtered_commands.get(this.selected_index).map(|c| c.name.clone())
                                         .or_else(|| {
-                                            this.query_handlers.iter()
-                                                .find(|h| h.prefix.starts_with(&search))
-                                                .map(|h| h.prefix.clone())
+                                            this.all_commands.iter()
+                                                .find(|c| c.has_handler && c.name.starts_with(&search))
+                                                .map(|c| c.name.clone())
                                         })
                                 } else {
                                     None
@@ -540,7 +554,7 @@ impl Render for BattoApp {
                         .into_any_element()
                 }
                 Mode::Command => {
-                    if active_query_prefix.is_some() {
+                    if active_handler_cmd.is_some() {
                         render_query_results(query_results, selected, &scroll_handle).into_any_element()
                     } else if filling_args {
                         render_arg_form(&current_cmd_args, &arg_values, active_arg_index, arg_cursor_pos, &arg_search, arg_choice_idx, &filtered_choices).into_any_element()

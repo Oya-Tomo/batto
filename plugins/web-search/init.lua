@@ -1,60 +1,76 @@
 -- web-search plugin: multi-engine web search
 -- Usage: /gg <query>, /gh <query>, /so <query>, /ddg <query>
 
-batto.on_query({
-    prefix = "gg",
+batto.command({
+    name = "gg",
     description = "Google search",
-    handler = function(query)
-        if query == "" then
+    args = {
+        { name = "query", required = true, type = "string" },
+    },
+    handler = function(args)
+        local q = args.query or ""
+        if q == "" then
             return { { title = "Google Search", exec = "xdg-open https://google.com" } }
         end
         return {
-            { title = "Search Google: " .. query,
-              exec = "xdg-open 'https://google.com/search?q=" .. query .. "'" },
+            { title = "Search Google: " .. q,
+              exec = "xdg-open 'https://google.com/search?q=" .. q .. "'" },
         }
     end,
 })
 
-batto.on_query({
-    prefix = "gh",
+batto.command({
+    name = "gh",
     description = "GitHub search",
-    handler = function(query)
-        if query == "" then
+    args = {
+        { name = "query", required = true, type = "string" },
+    },
+    handler = function(args)
+        local q = args.query or ""
+        if q == "" then
             return { { title = "GitHub", exec = "xdg-open https://github.com" } }
         end
         return {
-            { title = "Search GitHub: " .. query,
-              exec = "xdg-open 'https://github.com/search?q=" .. query .. "'" },
-            { title = "Open repo: " .. query,
-              exec = "xdg-open 'https://github.com/" .. query .. "'" },
+            { title = "Search GitHub: " .. q,
+              exec = "xdg-open 'https://github.com/search?q=" .. q .. "'" },
+            { title = "Open repo: " .. q,
+              exec = "xdg-open 'https://github.com/" .. q .. "'" },
         }
     end,
 })
 
-batto.on_query({
-    prefix = "so",
+batto.command({
+    name = "so",
     description = "Stack Overflow search",
-    handler = function(query)
-        if query == "" then
+    args = {
+        { name = "query", required = true, type = "string" },
+    },
+    handler = function(args)
+        local q = args.query or ""
+        if q == "" then
             return { { title = "Stack Overflow", exec = "xdg-open https://stackoverflow.com" } }
         end
         return {
-            { title = "Search Stack Overflow: " .. query,
-              exec = "xdg-open 'https://stackoverflow.com/search?q=" .. query .. "'" },
+            { title = "Search Stack Overflow: " .. q,
+              exec = "xdg-open 'https://stackoverflow.com/search?q=" .. q .. "'" },
         }
     end,
 })
 
-batto.on_query({
-    prefix = "ddg",
+batto.command({
+    name = "ddg",
     description = "DuckDuckGo search",
-    handler = function(query)
-        if query == "" then
+    args = {
+        { name = "query", required = true, type = "string" },
+    },
+    handler = function(args)
+        local q = args.query or ""
+        if q == "" then
             return { { title = "DuckDuckGo", exec = "xdg-open https://duckduckgo.com" } }
         end
         return {
-            { title = "Search DuckDuckGo: " .. query,
-              exec = "xdg-open 'https://duckduckgo.com/?q=" .. query .. "'" },
+            { title = "Search DuckDuckGo: " .. q,
+              exec = "xdg-open 'https://duckduckgo.com/?q=" .. q .. "'" },
         }
     end,
 })

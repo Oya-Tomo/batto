@@ -38,12 +38,12 @@ pub fn load_config() -> types::AppConfig {
         })
 }
 
-pub fn load_config_and_commands() -> (types::AppConfig, Vec<types::UserCommand>, Vec<types::QueryHandlerInfo>) {
+pub fn load_config_and_commands() -> (types::AppConfig, Vec<types::UserCommand>) {
     let path = ensure_config();
     lua_engine::parse_config(&path)
-        .map(|out| (out.config, out.commands, out.query_handlers))
+        .map(|out| (out.config, out.commands))
         .unwrap_or_else(|e| {
             eprintln!("warning: failed to parse config: {e}");
-            (types::AppConfig::default(), Vec::new(), Vec::new())
+            (types::AppConfig::default(), Vec::new())
         })
 }

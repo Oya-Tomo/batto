@@ -16,10 +16,14 @@ batto.command({
     exec = "terminal -e sh -c 'docker images; read'",
 })
 
-batto.on_query({
-    prefix = "dk",
+batto.command({
+    name = "dk",
     description = "Docker containers",
-    handler = function(query)
+    args = {
+        { name = "query", type = "string" },
+    },
+    handler = function(args)
+        local query = args.query or ""
         -- List running containers and filter
         local output = batto.fetch("http://localhost/containers/json", {
             headers = {},

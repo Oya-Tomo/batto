@@ -120,7 +120,7 @@ batto.use("discord")
 
 ### Plugin API
 
-**Register a command:**
+**Register a command with `exec` template:**
 
 ```lua
 batto.command({
@@ -143,11 +143,11 @@ batto.command({
 
 Argument types: `string`, `literal` (selectable from choices).
 
-**Dynamic query handler:**
+**Register a command with `handler` (dynamic results):**
 
 ```lua
-batto.on_query({
-  prefix = "gg",
+batto.command({
+  name = "gg",
   description = "Google search",
   handler = function(query)
     return {
@@ -157,6 +157,31 @@ batto.on_query({
   end,
 })
 ```
+
+**Command with `args` + `handler`:**
+
+```lua
+batto.command({
+  name = "discord",
+  description = "Send Discord message",
+  args = {
+    { name = "channel", required = true, type = "literal",
+      choices = { { name = "General", value = "https://..." } } },
+    { name = "message", required = true, type = "string" },
+  },
+  handler = function(args)
+    return {
+      { title = "Send: " .. args.message,
+        exec = "curl -s -X POST '" .. args.channel .. "' -H 'Content-Type: application/json' -d '{\"content\":\"" .. args.message .. "\"}'" },
+    }
+  end,
+})
+```
+
+- `args` + `exec`: arg form shown, template substitution on submit
+- `args` + `handler`: arg form shown, handler called with `{name=value}` table on submit
+- No `args` + `handler`: handler called with query text on each keystroke (dynamic search)
+- No `args` + `exec`: run on submit
 
 **HTTP request:**
 

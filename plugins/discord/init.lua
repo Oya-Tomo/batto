@@ -1,7 +1,6 @@
--- discord plugin: open Discord and send messages via webhook
+-- discord plugin: send messages via webhook
 -- Usage:
 --   /discord         -- send message via Discord webhook (select channel)
-
 
 batto.command({
   name = "discord",
@@ -19,5 +18,14 @@ batto.command({
     },
     { name = "message", required = true, type = "string" },
   },
-  exec = "curl -s -X POST '{{channel}}' -H 'Content-Type: application/json' -d '{\"content\":\"{{message}}\"}'",
+  handler = function(args)
+    local channel = args.channel or ""
+    local message = args.message or ""
+    return {
+      {
+        title = "Send to Discord: " .. message,
+        exec = "curl -s -X POST '" .. channel .. "' -H 'Content-Type: application/json' -d '{\"content\":\"" .. message .. "\"}'",
+      },
+    }
+  end,
 })

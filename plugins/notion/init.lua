@@ -2,10 +2,14 @@
 -- Requires: NOTION_TOKEN environment variable
 -- Usage: /notion <query>
 
-batto.on_query({
-    prefix = "notion",
+batto.command({
+    name = "notion",
     description = "Search Notion pages",
-    handler = function(query)
+    args = {
+        { name = "query", required = true, type = "string" },
+    },
+    handler = function(args)
+        local query = args.query or ""
         local token = batto.env("NOTION_TOKEN")
         if not token then
             return { { title = "Set NOTION_TOKEN env var to use Notion search", exec = "true" } }
