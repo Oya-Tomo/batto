@@ -22,28 +22,36 @@ Raycast-like application launcher for Linux, built with Rust and GPUI.
 ## Install
 
 ```bash
-make install
+make build
+sudo make install
+make setup
+make enable
 ```
 
-This builds the release binary, installs `batto` and `battod` to `/usr/local/bin`, and sets up the systemd user service.
+- `make build` — Build release binaries
+- `sudo make install` — Install binaries to `/usr/local/bin`
+- `make setup` — Set up systemd user service
+- `make enable` — Enable and start the daemon (auto-starts on login)
 
 To install to a different prefix:
 
 ```bash
-make install PREFIX=~/.local
+sudo make install PREFIX=~/.local
 ```
-
-## Enable the daemon
-
-```bash
-make enable
-```
-
-This enables and starts `battod` as a systemd user service. The daemon will auto-start on login.
 
 ## Set up a hotkey
 
-### GNOME
+### GNOME (GUI)
+
+1. Open **Settings** > **Keyboard**
+2. Click **Custom Shortcuts** (or **View and Customize Shortcuts** > **Custom Shortcuts**)
+3. Click **Add Shortcut**
+4. Fill in:
+   - **Name**: `batto`
+   - **Command**: `batto`
+   - **Shortcut**: press your desired key (e.g. `Ctrl+Space`)
+
+### GNOME (CLI)
 
 ```bash
 gsettings set org.gnome.settings-daemon.plugins.media-keys custom-keybindings \
