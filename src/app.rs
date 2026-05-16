@@ -1,7 +1,7 @@
 use gpui::*;
 use std::ops::Range;
 
-use crate::config::types::{AppConfig, CommandArg, QueryHandlerInfo, QueryResult, UserCommand};
+use crate::config::types::{AppConfig, CommandArg, KeyPressInfo, QueryHandlerInfo, QueryResult, UserCommand};
 use crate::discovery::types::AppEntry;
 use crate::search::fuzzy::fuzzy_match;
 
@@ -35,6 +35,7 @@ pub struct BattoApp {
     arg_cursor_pos: usize,
     arg_search: String,
     arg_choice_idx: usize,
+    scroll_handle: ScrollHandle,
 }
 
 impl BattoApp {
@@ -67,6 +68,7 @@ impl BattoApp {
             arg_cursor_pos: 0,
             arg_search: String::new(),
             arg_choice_idx: 0,
+            scroll_handle: ScrollHandle::new(),
         }
     }
 
@@ -149,6 +151,14 @@ impl BattoApp {
             }
         }
         self.selected_index = 0;
+    }
+
+    fn byte_pos(&self, char_idx: usize) -> usize {
+        self.query.char_indices().nth(char_idx).map(|(i, _)| i).unwrap_or(self.query.len())
+    }
+
+    fn char_pos(&self, byte_idx: usize) -> usize {
+        self.query[..byte_idx].chars().count()
     }
 
     fn search_term(&self) -> &str {
@@ -275,21 +285,10 @@ impl BattoApp {
         exec
     }
 
-    fn grid_columns(&self) -> usize {
-        let icon_size = self.config.window.icon_size as f32;
-        let cell_width = icon_size + 24.0; // icon + padding
-        let window_width = self.config.window.width as f32 - 32.0; // minus horizontal padding
-        ((window_width / cell_width).floor() as usize).max(1)
-    }
-
     fn move_up(&mut self) {
-        if self.mode == Mode::App {
-            let cols = self.grid_columns();
-            if self.selected_index >= cols {
-                self.selected_index -= cols;
-            }
-        } else if self.selected_index > 0 {
+        if self.selected_index > 0 {
             self.selected_index -= 1;
+            self.scroll_handle.scroll_to_item(self.selected_index);
         }
     }
 
@@ -305,13 +304,9 @@ impl BattoApp {
             }
             Mode::Calculator => return,
         };
-        if self.mode == Mode::App {
-            let cols = self.grid_columns();
-            if self.selected_index + cols < max {
-                self.selected_index += cols;
-            }
-        } else if self.selected_index + 1 < max {
+        if self.selected_index + 1 < max {
             self.selected_index += 1;
+            self.scroll_handle.scroll_to_item(self.selected_index);
         }
     }
 
@@ -335,7 +330,6 @@ impl Focusable for BattoApp {
 impl Render for BattoApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let icon_size = self.config.window.icon_size as f32;
-        let show_name = self.config.window.show_name;
         let mode = self.mode;
         let query = self.query.clone();
         let cursor_pos = self.cursor_pos;
@@ -351,6 +345,7 @@ impl Render for BattoApp {
         let arg_values = self.arg_values.clone();
         let arg_search = self.arg_search.clone();
         let arg_choice_idx = self.arg_choice_idx;
+        let scroll_handle = self.scroll_handle.clone();
         let filtered_choices = self.filtered_choices();
         let current_cmd_args: Vec<CommandArg> = if filling_args {
             self.filtered_commands.first()
@@ -371,7 +366,13 @@ impl Render for BattoApp {
             .track_focus(&self.focus_handle)
             .on_key_down(cx.listener(
                 |this, event: &KeyDownEvent, _window, cx| {
-                    let key = &event.keystroke.key;
+                    let info = KeyPressInfo {
+                        key: event.keystroke.key.clone(),
+                        shift: event.keystroke.modifiers.shift,
+                        control: event.keystroke.modifiers.control,
+                        alt: event.keystroke.modifiers.alt,
+                    };
+                    let keys = &this.config.keys;
                     // When filling args, redirect most keys to arg input
                     if this.filling_args {
                         let is_literal = this.filtered_commands.first()
@@ -381,180 +382,170 @@ impl Render for BattoApp {
                         let cmd_args = this.filtered_commands.first()
                             .map(|c| c.args.len())
                             .unwrap_or(0);
-                        match key.as_str() {
-                            "escape" => {
-                                this.filling_args = false;
+                        if keys.matches(&keys.close, &info) {
+                            this.filling_args = false;
+                        } else if keys.matches(&keys.accept, &info) {
+                            if is_literal {
+                                this.commit_literal_choice();
                             }
-                            "enter" => {
-                                if is_literal {
-                                    this.commit_literal_choice();
-                                }
-                                if this.active_arg_index + 1 < cmd_args {
-                                    this.active_arg_index += 1;
-                                    this.arg_cursor_pos = 0;
-                                    this.reset_arg_search();
-                                } else {
-                                    this.launch_selected(cx);
-                                }
+                            if this.active_arg_index + 1 < cmd_args {
+                                this.active_arg_index += 1;
+                                this.arg_cursor_pos = 0;
+                                this.reset_arg_search();
+                            } else {
+                                this.launch_selected(cx);
                             }
-                            "tab" => {
-                                if is_literal {
-                                    this.commit_literal_choice();
-                                }
-                                if cmd_args > 0 {
-                                    this.active_arg_index = (this.active_arg_index + 1) % cmd_args;
-                                    this.arg_cursor_pos = this.arg_values.get(this.active_arg_index).map(|s| s.len()).unwrap_or(0);
-                                    this.reset_arg_search();
-                                }
+                        } else if keys.matches(&keys.tab_complete, &info) {
+                            if is_literal {
+                                this.commit_literal_choice();
                             }
-                            "up" if is_literal => {
-                                if this.arg_choice_idx > 0 {
-                                    this.arg_choice_idx -= 1;
-                                }
+                            if cmd_args > 0 {
+                                this.active_arg_index = (this.active_arg_index + 1) % cmd_args;
+                                this.arg_cursor_pos = this.arg_values.get(this.active_arg_index).map(|s| s.chars().count()).unwrap_or(0);
+                                this.reset_arg_search();
                             }
-                            "down" if is_literal => {
-                                let count = this.filtered_choices().len();
-                                if this.arg_choice_idx + 1 < count {
-                                    this.arg_choice_idx += 1;
-                                }
+                        } else if keys.matches(&keys.up, &info) && is_literal {
+                            if this.arg_choice_idx > 0 {
+                                this.arg_choice_idx -= 1;
                             }
-                            "backspace" if is_literal => {
+                        } else if keys.matches(&keys.down, &info) && is_literal {
+                            let count = this.filtered_choices().len();
+                            if this.arg_choice_idx + 1 < count {
+                                this.arg_choice_idx += 1;
+                            }
+                        } else if info.key == "backspace" {
+                            if is_literal {
                                 if !this.arg_search.is_empty() {
                                     this.arg_search.pop();
                                     this.arg_choice_idx = 0;
                                 } else if this.active_arg_index > 0 {
                                     this.active_arg_index -= 1;
-                                    this.arg_cursor_pos = this.arg_values.get(this.active_arg_index).map(|s| s.len()).unwrap_or(0);
+                                    this.arg_cursor_pos = this.arg_values.get(this.active_arg_index).map(|s| s.chars().count()).unwrap_or(0);
                                     this.reset_arg_search();
                                 }
-                            }
-                            "backspace" if !is_literal => {
+                            } else {
                                 if this.arg_cursor_pos > 0 {
                                     if let Some(val) = this.arg_values.get_mut(this.active_arg_index) {
-                                        val.remove(this.arg_cursor_pos - 1);
+                                        let bp = val.char_indices().nth(this.arg_cursor_pos - 1).map(|(i, _)| i).unwrap_or(0);
+                                        let ep = val.char_indices().nth(this.arg_cursor_pos).map(|(i, _)| i).unwrap_or(val.len());
+                                        val.drain(bp..ep);
                                         this.arg_cursor_pos -= 1;
                                     }
                                 } else if this.active_arg_index > 0 {
                                     this.active_arg_index -= 1;
-                                    this.arg_cursor_pos = this.arg_values.get(this.active_arg_index).map(|s| s.len()).unwrap_or(0);
+                                    this.arg_cursor_pos = this.arg_values.get(this.active_arg_index).map(|s| s.chars().count()).unwrap_or(0);
                                     this.reset_arg_search();
                                 }
                             }
-                            "left" if !is_literal => {
-                                if this.arg_cursor_pos > 0 {
-                                    this.arg_cursor_pos -= 1;
-                                }
+                        } else if info.key == "left" && !is_literal {
+                            if this.arg_cursor_pos > 0 {
+                                this.arg_cursor_pos -= 1;
                             }
-                            "right" if !is_literal => {
-                                let len = this.arg_values.get(this.active_arg_index).map(|s| s.len()).unwrap_or(0);
-                                if this.arg_cursor_pos < len {
-                                    this.arg_cursor_pos += 1;
-                                }
+                        } else if info.key == "right" && !is_literal {
+                            let len = this.arg_values.get(this.active_arg_index).map(|s| s.chars().count()).unwrap_or(0);
+                            if this.arg_cursor_pos < len {
+                                this.arg_cursor_pos += 1;
                             }
-                            _ => {}
                         }
                         cx.notify();
                         return;
                     }
-                    match key.as_str() {
-                        "escape" => cx.quit(),
-                        "enter" => this.launch_selected(cx),
-                        "up" => {
-                            this.move_up();
-                            cx.notify();
-                        }
-                        "down" => {
-                            this.move_down();
-                            cx.notify();
-                        }
-                        "left" => {
-                            if this.cursor_pos > 0 {
-                                this.cursor_pos -= 1;
-                                cx.notify();
+                    if keys.matches(&keys.close, &info) {
+                        cx.quit();
+                    } else if keys.matches(&keys.accept, &info) {
+                        this.launch_selected(cx);
+                    } else if keys.matches(&keys.up, &info) {
+                        this.move_up();
+                        cx.notify();
+                    } else if keys.matches(&keys.down, &info) {
+                        this.move_down();
+                        cx.notify();
+                    } else if keys.matches(&keys.tab_complete, &info) {
+                        let search = this.search_term().to_string();
+                        let prefix_len = this.query.len() - search.len();
+                        let completion = match this.mode {
+                            Mode::App => {
+                                this.filtered_apps.get(this.selected_index).map(|a| a.name.clone())
                             }
-                        }
-                        "right" => {
-                            if this.cursor_pos < this.query.len() {
-                                this.cursor_pos += 1;
-                                cx.notify();
-                            }
-                        }
-                        "backspace" => {
-                            if this.cursor_pos > 0 {
-                                this.query.remove(this.cursor_pos - 1);
-                                this.cursor_pos -= 1;
-                            }
-                            if this.query.is_empty() {
-                                if this.mode == Mode::Command || this.mode == Mode::Calculator {
-                                    this.mode = Mode::App;
+                            Mode::Command => {
+                                if this.active_query_prefix.is_none() {
+                                    this.filtered_commands.get(this.selected_index).map(|c| c.name.clone())
+                                        .or_else(|| {
+                                            this.query_handlers.iter()
+                                                .find(|h| h.prefix.starts_with(&search))
+                                                .map(|h| h.prefix.clone())
+                                        })
+                                } else {
+                                    None
                                 }
                             }
-                            this.update_results();
-                            cx.notify();
-                        }
-                        "tab" => {
-                            let search = this.search_term().to_string();
-                            let prefix_len = this.query.len() - search.len();
-                            let completion = match this.mode {
-                                Mode::App => {
-                                    this.filtered_apps.first().map(|a| a.name.clone())
-                                }
-                                Mode::Command => {
-                                    if this.active_query_prefix.is_none() {
-                                        this.filtered_commands.first().map(|c| c.name.clone())
-                                            .or_else(|| {
-                                                this.query_handlers.iter()
-                                                    .find(|h| h.prefix.starts_with(&search))
-                                                    .map(|h| h.prefix.clone())
-                                            })
-                                    } else {
-                                        None
-                                    }
-                                }
-                                Mode::Calculator => None,
-                            };
-                            if let Some(name) = completion {
-                                if name.len() > search.len() {
-                                    this.query = format!("{}{}", &this.query[..prefix_len], name);
-                                    this.cursor_pos = this.query.len();
-                                    this.update_results();
-                                    cx.notify();
-                                }
-                            }
-                        }
-                        "delete" => {
-                            if this.cursor_pos < this.query.len() {
-                                this.query.remove(this.cursor_pos);
+                            Mode::Calculator => None,
+                        };
+                        if let Some(name) = completion {
+                            if name.to_lowercase() != search.to_lowercase() {
+                                this.query = format!("{}{}", &this.query[..prefix_len], name);
+                                this.cursor_pos = this.query.len();
                                 this.update_results();
                                 cx.notify();
                             }
                         }
-                        "home" => {
-                            let min = if this.mode == Mode::Command || this.mode == Mode::Calculator { 1 } else { 0 };
-                            this.cursor_pos = min;
+                    } else if info.key == "backspace" {
+                        if this.cursor_pos > 0 {
+                            let byte_pos = this.byte_pos(this.cursor_pos - 1);
+                            let prev_byte = this.byte_pos(this.cursor_pos);
+                            this.query.drain(byte_pos..prev_byte);
+                            this.cursor_pos -= 1;
+                        }
+                        if this.query.is_empty() {
+                            if this.mode == Mode::Command || this.mode == Mode::Calculator {
+                                this.mode = Mode::App;
+                            }
+                        }
+                        this.update_results();
+                        cx.notify();
+                    } else if info.key == "delete" {
+                        let len = this.query.chars().count();
+                        if this.cursor_pos < len {
+                            let byte_pos = this.byte_pos(this.cursor_pos);
+                            let next_byte = this.byte_pos(this.cursor_pos + 1);
+                            this.query.drain(byte_pos..next_byte);
+                            this.update_results();
                             cx.notify();
                         }
-                        "end" => {
-                            this.cursor_pos = this.query.len();
+                    } else if info.key == "left" {
+                        if this.cursor_pos > 0 {
+                            this.cursor_pos -= 1;
                             cx.notify();
                         }
-                        _ => {}
+                    } else if info.key == "right" {
+                        let len = this.query.chars().count();
+                        if this.cursor_pos < len {
+                            this.cursor_pos += 1;
+                            cx.notify();
+                        }
+                    } else if info.key == "home" {
+                        let min = if this.mode == Mode::Command || this.mode == Mode::Calculator { 1 } else { 0 };
+                        this.cursor_pos = min;
+                        cx.notify();
+                    } else if info.key == "end" {
+                        this.cursor_pos = this.query.chars().count();
+                        cx.notify();
                     }
                 },
             ))
             .child(render_search_bar(&query, mode, cursor_pos))
             .child(match mode {
                 Mode::App => {
-                    render_app_grid(filtered_apps, selected, icon_size, show_name)
+                    render_app_grid(filtered_apps, selected, icon_size, &scroll_handle)
                         .into_any_element()
                 }
                 Mode::Command => {
                     if active_query_prefix.is_some() {
-                        render_query_results(query_results, selected).into_any_element()
+                        render_query_results(query_results, selected, &scroll_handle).into_any_element()
                     } else if filling_args {
                         render_arg_form(&current_cmd_args, &arg_values, active_arg_index, arg_cursor_pos, &arg_search, arg_choice_idx, &filtered_choices).into_any_element()
                     } else {
-                        render_command_list(filtered_commands, selected).into_any_element()
+                        render_command_list(filtered_commands, selected, &scroll_handle).into_any_element()
                     }
                 }
                 Mode::Calculator => {
@@ -620,8 +611,9 @@ impl EntityInputHandler for BattoApp {
                 self.arg_search.push_str(text);
                 self.arg_choice_idx = 0;
             } else if let Some(val) = self.arg_values.get_mut(self.active_arg_index) {
-                val.insert_str(self.arg_cursor_pos, text);
-                self.arg_cursor_pos += text.len();
+                let bp = val.char_indices().nth(self.arg_cursor_pos).map(|(i, _)| i).unwrap_or(val.len());
+                val.insert_str(bp, text);
+                self.arg_cursor_pos += text.chars().count();
             }
             cx.notify();
             return;
@@ -632,8 +624,9 @@ impl EntityInputHandler for BattoApp {
         } else if text.starts_with('=') && self.query.is_empty() {
             self.mode = Mode::Calculator;
         }
-        self.query.insert_str(self.cursor_pos, text);
-        self.cursor_pos += text.len();
+        let byte_pos = self.byte_pos(self.cursor_pos);
+        self.query.insert_str(byte_pos, text);
+        self.cursor_pos += text.chars().count();
         self.update_results();
         cx.notify();
     }
@@ -709,9 +702,10 @@ fn render_search_bar(query: &str, mode: Mode, cursor_pos: usize) -> Div {
     let start = if prefix_color.is_some() { 1 } else { 0 };
     let display = &query[start..];
     let cpos = cursor_pos.saturating_sub(start);
+    let byte_cpos = display.char_indices().nth(cpos).map(|(i, _)| i).unwrap_or(display.len());
 
-    let before = display[..cpos].to_string();
-    let after = display[cpos..].to_string();
+    let before = display[..byte_cpos].to_string();
+    let after = display[byte_cpos..].to_string();
 
     let input = div()
         .flex()
@@ -728,21 +722,22 @@ fn render_app_grid(
     apps: &[AppEntry],
     selected: usize,
     icon_size: f32,
-    show_name: bool,
+    scroll_handle: &ScrollHandle,
 ) -> impl IntoElement {
     div()
         .id("app-grid")
         .flex_1()
         .w_full()
         .overflow_y_scroll()
+        .track_scroll(scroll_handle)
         .px(px(16.0))
         .py(px(12.0))
         .children(apps.iter().enumerate().map(|(i, entry)| {
             let is_selected = i == selected;
             let mut cell = div()
                 .w_full()
-                .h(px(icon_size + 12.0))
                 .px(px(8.0))
+                .py(px(4.0))
                 .flex()
                 .items_center()
                 .gap(px(12.0))
@@ -773,30 +768,28 @@ fn render_app_grid(
 
             cell = cell.child(icon);
 
-            if show_name {
-                cell = cell.child(
-                    div()
-                        .child(entry.name.clone())
-                        .text_color(if is_selected {
-                            rgb(0xcdd6f4)
-                        } else {
-                            rgb(0xa6adc8)
-                        })
-                        .text_size(px(13.0))
-                        .overflow_hidden(),
-                );
-            }
-
-            cell
+            cell.child(
+                div()
+                    .flex_1()
+                    .overflow_hidden()
+                    .child(entry.name.clone())
+                    .text_color(if is_selected {
+                        rgb(0xcdd6f4)
+                    } else {
+                        rgb(0xa6adc8)
+                    })
+                    .text_size(px(13.0)),
+            )
         }))
 }
 
-fn render_command_list(commands: &[UserCommand], selected: usize) -> impl IntoElement {
+fn render_command_list(commands: &[UserCommand], selected: usize, scroll_handle: &ScrollHandle) -> impl IntoElement {
     div()
         .id("command-list")
         .flex_1()
         .w_full()
         .overflow_y_scroll()
+        .track_scroll(scroll_handle)
         .children(commands.iter().enumerate().map(|(i, cmd)| {
             let is_selected = i == selected;
             let el = div()
@@ -873,12 +866,13 @@ fn render_calculator(query: &str, result: &Option<String>) -> impl IntoElement {
         )
 }
 
-fn render_query_results(results: &[QueryResult], selected: usize) -> impl IntoElement {
+fn render_query_results(results: &[QueryResult], selected: usize, scroll_handle: &ScrollHandle) -> impl IntoElement {
     div()
         .id("query-results")
         .flex_1()
         .w_full()
         .overflow_y_scroll()
+        .track_scroll(scroll_handle)
         .children(results.iter().enumerate().map(|(i, result)| {
             let is_selected = i == selected;
             let el = div()
@@ -980,8 +974,9 @@ fn render_arg_form(
             }
         } else {
             let cpos = if is_active { cursor_pos } else { 0 };
-            let before = value[..cpos].to_string();
-            let after = value[cpos..].to_string();
+            let byte_cpos = value.char_indices().nth(cpos).map(|(i, _)| i).unwrap_or(value.len());
+            let before = value[..byte_cpos].to_string();
+            let after = value[byte_cpos..].to_string();
 
             if is_active {
                 let input = div()

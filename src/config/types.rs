@@ -13,7 +13,6 @@ pub struct WindowConfig {
     pub width: u32,
     pub list_height: u32,
     pub icon_size: u32,
-    pub show_name: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -83,7 +82,6 @@ impl Default for WindowConfig {
             width: 600,
             list_height: 300,
             icon_size: 48,
-            show_name: true,
         }
     }
 }
@@ -98,4 +96,33 @@ impl Default for KeyConfig {
             tab_complete: "tab".into(),
         }
     }
+}
+
+impl KeyConfig {
+    pub fn matches(&self, binding: &str, event: &KeyPressInfo) -> bool {
+        let mut parts: Vec<&str> = binding.split('+').collect();
+        let key = parts.pop().unwrap_or("").to_lowercase();
+        let mut shift = false;
+        let mut control = false;
+        let mut alt = false;
+        for part in &parts {
+            match *part {
+                "shift" => shift = true,
+                "ctrl" | "control" => control = true,
+                "alt" => alt = true,
+                _ => {}
+            }
+        }
+        event.key == key
+            && event.shift == shift
+            && event.control == control
+            && event.alt == alt
+    }
+}
+
+pub struct KeyPressInfo {
+    pub key: String,
+    pub shift: bool,
+    pub control: bool,
+    pub alt: bool,
 }

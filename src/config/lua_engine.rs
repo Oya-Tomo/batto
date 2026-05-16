@@ -291,9 +291,6 @@ fn extract_output(lua: &Lua, globals: &mlua::Table) -> Result<LuaOutput, Box<dyn
             if let Ok(s) = window.get::<u32>("icon_size") {
                 config.window.icon_size = s;
             }
-            if let Ok(s) = window.get::<bool>("show_name") {
-                config.window.show_name = s;
-            }
         }
 
         if let Ok(keys) = tbl.get::<Table>("keys") {

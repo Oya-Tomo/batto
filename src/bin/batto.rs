@@ -30,8 +30,9 @@ fn main() {
                 titlebar: Some(TitlebarOptions {
                     title: Some("batto".into()),
                     appears_transparent: true,
-                    ..Default::default()
+                    traffic_light_position: None,
                 }),
+                window_decorations: Some(WindowDecorations::Client),
                 focus: true,
                 show: true,
                 ..Default::default()
