@@ -39,6 +39,10 @@ Config file: `~/.config/batto/init.lua`
 
 Generated automatically on first launch with defaults.
 
+For the full Lua API reference, see [Lua API Reference](lua-api.md).
+
+Below are the basic usage examples.
+
 ### batto.setup()
 
 ```lua
