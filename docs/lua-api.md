@@ -342,7 +342,19 @@ local json = batto.json_encode({
 
 ## batto.env(name)
 
-Retrieves an environment variable.
+Retrieves an environment variable. Values are sourced from the process environment and `~/.config/batto/.env`.
+
+### .env file
+
+Secrets can be stored in `~/.config/batto/.env` instead of shell profiles:
+
+```
+# ~/.config/batto/.env
+DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
+NOTION_TOKEN=secret_abc123
+```
+
+The file is loaded on daemon startup, `/reload`, and periodic rescan.
 
 ### Parameters
 

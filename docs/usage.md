@@ -86,6 +86,7 @@ Argument validation types: `string`, `path`, `url`, `number`.
 
 The daemon (`battod`) runs in the background and:
 
+- Reads `~/.config/batto/.env` for environment variables
 - Scans `.desktop` files from `/usr/share/applications/` and `~/.local/share/applications/`
 - Resolves icons via freedesktop icon theme
 - Parses your Lua config and user commands
@@ -93,7 +94,29 @@ The daemon (`battod`) runs in the background and:
 - Serves data to the client via Unix socket (`~/.cache/batto/batto.sock`)
 - Re-scans every 5 minutes automatically
 
-You normally don't need to manage it manually. If needed:
+### Built-in commands
+
+| Command | Description |
+|---------|-------------|
+| `/reload` | Reload config and `.env` without restarting daemon |
+| `/restart` | Restart daemon (picks up env vars from `.env`) |
+
+### Environment variables
+
+Store secrets in `~/.config/batto/.env`:
+
+```
+DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
+NOTION_TOKEN=secret_abc123
+```
+
+Use them in Lua plugins via `batto.env()`:
+
+```lua
+local url = batto.env("DISCORD_WEBHOOK_URL")
+```
+
+### Troubleshooting
 
 ```
 # Check if running
@@ -104,9 +127,6 @@ pkill battod
 
 # Logs
 cat ~/.cache/batto/daemon.log
-
-# Force rescan
-echo -n "rescan" | socat - UNIX-CONNECT:$HOME/.cache/batto/batto.sock
 ```
 
 ## Keyboard shortcut (recommended)

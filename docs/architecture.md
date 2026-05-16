@@ -84,16 +84,20 @@ Socket protocol is plaintext commands:
 |---|---|
 | `ping` | `ok` |
 | `get_all` | JSON `DaemonData { config, apps, commands }` |
-| `rescan` | `ok` (re-scans and updates cache) |
+| `rescan` | `ok` (reloads .env + Lua config and updates cache) |
 | `launch:<name>` | `ok` (records in history) |
+| `shutdown` | `ok` (exits daemon) |
 
 History is persisted to `~/.cache/batto/history.json`. Apps are sorted by recency on each scan.
+
+On startup and rescan, the daemon reads `~/.config/batto/.env` and sets environment variables before parsing Lua config. This allows `batto.env()` in plugins to access secrets without shell profile dependencies.
 
 ### `config/` — Lua configuration (daemon only at runtime)
 
 - `lua_engine.rs`: Creates an `mlua::Lua` runtime, exposes `batto.setup()` and `batto.command()` as Lua functions.
 - `mlua::Lua` is `!Send` — parsed once at daemon startup and discarded.
 - `init.lua` is auto-generated at `~/.config/batto/init.lua` on first run.
+- `.env` file at `~/.config/batto/.env` is loaded on startup and rescan via `load_dotenv()`.
 
 ### `discovery/` — Application scanning + icon resolution (daemon only at runtime)
 
@@ -113,10 +117,16 @@ Wraps `nucleo-matcher`. Matches against `AppEntry::name_lower`. Returns top 20 r
 ## Build
 
 ```
-cargo build
+cargo build --release
 ```
 
-Produces `target/debug/batto` and `target/debug/battod`. GPUI requires a running display server (X11 or Wayland).
+Produces `target/release/batto` and `target/release/battod`. GPUI requires a running display server (X11 or Wayland).
+
+Install with:
+
+```
+cargo install --path .
+```
 
 ## Key dependencies
 
@@ -133,5 +143,3 @@ Produces `target/debug/batto` and `target/debug/battod`. GPUI requires a running
 ## Known limitations
 
 - **No IME support**: Text input is via `on_key_down` only. CJK input methods won't work.
-- **No plugin system yet**: `batto.use()` is a no-op stub.
-- **No command dispatch**: `commands/dispatch.rs` exists but is not wired up.

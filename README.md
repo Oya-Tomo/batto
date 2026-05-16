@@ -22,22 +22,10 @@ Raycast-like application launcher for Linux, built with Rust and GPUI.
 ## Install
 
 ```bash
-make build
-sudo make install
-make setup
-make enable
+cargo install --path .
 ```
 
-- `make build` — Build release binaries
-- `sudo make install` — Install binaries to `/usr/local/bin`
-- `make setup` — Set up systemd user service
-- `make enable` — Enable and start the daemon (auto-starts on login)
-
-To install to a different prefix:
-
-```bash
-sudo make install PREFIX=~/.local
-```
+Installs `batto` and `battod` to `~/.cargo/bin/`. First launch is slightly slower (daemon startup), subsequent launches are instant.
 
 ## Set up a hotkey
 
@@ -50,6 +38,7 @@ sudo make install PREFIX=~/.local
    - **Name**: `batto`
    - **Command**: `batto`
    - **Shortcut**: press your desired key (e.g. `Ctrl+Space`)
+   - **Shortcut**: press your desired key (e.g. `Ctrl+Space`)
 
 ### GNOME (CLI)
 
@@ -61,7 +50,7 @@ gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/or
   name 'batto'
 
 gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/ \
-  command '/usr/local/bin/batto'
+  command 'batto'
 
 gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/ \
   binding '<Super>space'
@@ -82,14 +71,13 @@ bind = SUPER, space, exec, batto
 ## Uninstall
 
 ```bash
-make uninstall
+rm ~/.cargo/bin/batto ~/.cargo/bin/battod
 ```
-
-Stops the service and removes binaries and the service unit.
 
 ## Configuration
 
 Config file: `~/.config/batto/init.lua`
+Env file: `~/.config/batto/.env` (for secrets like API tokens)
 
 ```lua
 batto.setup({
@@ -201,6 +189,20 @@ local data = batto.json_decode(body)
 local json = batto.json_encode({ key = "value" })
 local token = batto.env("MY_API_TOKEN")
 ```
+
+Secrets like API tokens can be stored in `~/.config/batto/.env`:
+
+```
+MY_API_TOKEN=secret123
+DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
+```
+
+## Built-in commands
+
+| Command | Description |
+|---------|-------------|
+| `/reload` | Reload config and `.env` without restarting daemon |
+| `/restart` | Restart daemon (picks up new env vars from `.env`) |
 
 ## Usage
 

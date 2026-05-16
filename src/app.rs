@@ -100,7 +100,26 @@ impl BattoApp {
                     self.active_handler_cmd = None;
                     self.query_results.clear();
                     let search_lower = search.to_lowercase();
-                    self.filtered_commands = if search_lower.is_empty() {
+
+                    // Built-in restart command
+                    let restart_cmd = UserCommand {
+                        name: "restart".into(),
+                        description: "Restart daemon (reload env vars)".into(),
+                        args: Vec::new(),
+                        exec: String::new(),
+                        has_handler: false,
+                    };
+                    let reload_cmd = UserCommand {
+                        name: "reload".into(),
+                        description: "Reload config & .env".into(),
+                        args: Vec::new(),
+                        exec: String::new(),
+                        has_handler: false,
+                    };
+                    let show_restart = "restart".starts_with(&search_lower);
+                    let show_reload = "reload".starts_with(&search_lower);
+
+                    let mut filtered: Vec<UserCommand> = if search_lower.is_empty() {
                         self.all_commands.clone()
                     } else {
                         self.all_commands
@@ -113,6 +132,14 @@ impl BattoApp {
                             .cloned()
                             .collect()
                     };
+                    if show_restart {
+                        filtered.push(restart_cmd);
+                    }
+                    if show_reload {
+                        filtered.push(reload_cmd);
+                    }
+                    self.filtered_commands = filtered;
+
                     // Check if we should enter arg-filling mode
                     if !self.filling_args {
                         if let Some(cmd) = self.filtered_commands.first() {
@@ -167,7 +194,7 @@ impl BattoApp {
         }
     }
 
-    fn launch_selected(&self, cx: &mut Context<Self>) {
+    fn launch_selected(&mut self, cx: &mut Context<Self>) {
         match self.mode {
             Mode::App => {
                 if let Some(entry) = self.filtered_apps.get(self.selected_index) {
@@ -186,6 +213,63 @@ impl BattoApp {
                         cx.quit();
                     }
                 } else if self.filling_args {
+                    if let Some(cmd) = self.filtered_commands.first() {
+                        if cmd.has_handler {
+                            let mut args = std::collections::HashMap::new();
+                            for (i, arg) in cmd.args.iter().enumerate() {
+                                let val = self.arg_values.get(i).cloned().unwrap_or_default();
+                                args.insert(arg.name.clone(), val);
+                            }
+                            let results = crate::daemon::request_exec_handler(&cmd.name, &args)
+                                .unwrap_or_default();
+                            if let Some(result) = results.first() {
+                                let _ = std::process::Command::new("sh")
+                                    .arg("-c")
+                                    .arg(&result.exec)
+                                    .spawn();
+                            }
+                        } else {
+                            let exec = self.build_exec(cmd);
+                            let _ = std::process::Command::new("sh")
+                                .arg("-c")
+                                .arg(&exec)
+                                .spawn();
+                        }
+                        cx.quit();
+                    }
+                } else if let Some(cmd) = self.filtered_commands.get(self.selected_index) {
+                    if cmd.name == "restart" {
+                        crate::daemon::restart_daemon();
+                        if let Ok(data) = crate::daemon::request_all() {
+                            self.all_apps = data.apps;
+                            self.all_commands = data.commands;
+                            self.config = data.config;
+                            self.query.clear();
+                            self.cursor_pos = 0;
+                            self.mode = Mode::App;
+                            self.filling_args = false;
+                            self.active_handler_cmd = None;
+                            self.update_results();
+                        }
+                        cx.notify();
+                        return;
+                    }
+                    if cmd.name == "reload" {
+                        crate::daemon::request_rescan();
+                        if let Ok(data) = crate::daemon::request_all() {
+                            self.all_apps = data.apps;
+                            self.all_commands = data.commands;
+                            self.config = data.config;
+                            self.query.clear();
+                            self.cursor_pos = 0;
+                            self.mode = Mode::App;
+                            self.filling_args = false;
+                            self.active_handler_cmd = None;
+                            self.update_results();
+                        }
+                        cx.notify();
+                        return;
+                    }
                     if let Some(cmd) = self.filtered_commands.first() {
                         if cmd.has_handler {
                             let mut args = std::collections::HashMap::new();

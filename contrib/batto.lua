@@ -74,7 +74,7 @@ function batto.json_decode(s) end
 ---@return string
 function batto.json_encode(val) end
 
----Get an environment variable value.
+---Get an environment variable value. Also reads from ~/.config/batto/.env.
 ---@param name string Environment variable name
 ---@return string|nil
 function batto.env(name) end

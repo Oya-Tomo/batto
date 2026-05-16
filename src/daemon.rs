@@ -34,7 +34,26 @@ pub fn is_daemon_running() -> bool {
     }
 }
 
-pub fn start_daemon() {
+fn shutdown_daemon() {
+    let path = socket_path();
+    if !path.exists() {
+        return;
+    }
+    if let Ok(mut stream) = UnixStream::connect(&path) {
+        let _ = stream.write_all(b"shutdown");
+        // Wait for socket to be released
+        for _ in 0..50 {
+            std::thread::sleep(Duration::from_millis(50));
+            if !path.exists() {
+                return;
+            }
+        }
+        // Force cleanup if still hanging
+        let _ = std::fs::remove_file(&path);
+    }
+}
+
+fn spawn_daemon() {
     let dir = runtime_dir();
     std::fs::create_dir_all(&dir).ok();
 
@@ -63,6 +82,18 @@ pub fn start_daemon() {
             break;
         }
     }
+}
+
+pub fn restart_daemon() {
+    shutdown_daemon();
+    spawn_daemon();
+}
+
+pub fn start_daemon() {
+    if is_daemon_running() {
+        return;
+    }
+    spawn_daemon();
 }
 
 // --- History ---
@@ -177,12 +208,29 @@ pub fn request_exec_handler(name: &str, args: &std::collections::HashMap<String,
     serde_json::from_slice(&buf).map_err(|e| e.to_string())
 }
 
+pub fn request_rescan() -> Result<(), String> {
+    let mut stream = UnixStream::connect(socket_path()).map_err(|e| e.to_string())?;
+    stream
+        .set_write_timeout(Some(Duration::from_secs(5)))
+        .map_err(|e| e.to_string())?;
+    stream.write_all(b"rescan").map_err(|e| e.to_string())?;
+    let mut buf = [0u8; 16];
+    stream.set_read_timeout(Some(Duration::from_secs(5))).map_err(|e| e.to_string())?;
+    let n = stream.read(&mut buf).map_err(|e| e.to_string())?;
+    if &buf[..n] == b"ok" {
+        Ok(())
+    } else {
+        Err("rescan failed".into())
+    }
+}
+
 // --- Daemon server ---
 
 pub fn run_daemon() {
     let dir = runtime_dir();
     std::fs::create_dir_all(&dir).ok();
 
+    crate::config::load_dotenv();
     let config_path = crate::config::ensure_config();
     let mut lua_runtime = match LuaRuntime::new(&config_path) {
         Ok(r) => r,
@@ -232,6 +280,7 @@ pub fn run_daemon() {
         // Check rescan flag
         if rescan_flag.exists() {
             let _ = std::fs::remove_file(&rescan_flag);
+            crate::config::load_dotenv();
             if lua_runtime.reload(&config_path).is_ok() {
                 let out = lua_runtime.output();
                 let mut new_apps = crate::discovery::discover_apps();
@@ -255,6 +304,10 @@ pub fn run_daemon() {
                     let cmd = String::from_utf8_lossy(&buf[..n]).to_string();
                     if cmd == "ping" {
                         let _ = stream.write_all(b"ok");
+                    } else if cmd == "shutdown" {
+                        let _ = stream.write_all(b"ok");
+                        let _ = std::fs::remove_file(&path);
+                        break;
                     } else if cmd == "get_all" {
                         if let Ok(data) = std::fs::read(&cache_path) {
                             let _ = stream.write_all(&data);
@@ -262,6 +315,7 @@ pub fn run_daemon() {
                             let _ = stream.write_all(b"{}");
                         }
                     } else if cmd == "rescan" {
+                        crate::config::load_dotenv();
                         if lua_runtime.reload(&config_path).is_ok() {
                             let out = lua_runtime.output();
                             let mut new_apps = crate::discovery::discover_apps();

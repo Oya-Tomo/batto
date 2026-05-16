@@ -18,6 +18,30 @@ fn init_lua_path() -> PathBuf {
     config_dir().join("init.lua")
 }
 
+pub fn env_path() -> PathBuf {
+    config_dir().join(".env")
+}
+
+pub fn load_dotenv() {
+    let path = env_path();
+    let content = match fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if let Some((key, value)) = line.split_once('=') {
+            let key = key.trim();
+            let value = value.trim().trim_matches('"').trim_matches('\'');
+            // SAFETY: .env values are user-controlled config, no concurrent access
+            unsafe { std::env::set_var(key, value); }
+        }
+    }
+}
+
 pub fn ensure_config() -> PathBuf {
     let path = init_lua_path();
     if !path.exists() {
