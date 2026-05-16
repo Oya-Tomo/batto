@@ -1,4 +1,5 @@
 use gpui::*;
+use std::ops::Range;
 
 use crate::config::types::{AppConfig, CommandArg, QueryHandlerInfo, QueryResult, UserCommand};
 use crate::discovery::types::AppEntry;
@@ -332,7 +333,7 @@ impl Focusable for BattoApp {
 }
 
 impl Render for BattoApp {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let icon_size = self.config.window.icon_size as f32;
         let show_name = self.config.window.show_name;
         let mode = self.mode;
@@ -359,7 +360,10 @@ impl Render for BattoApp {
             Vec::new()
         };
 
-        div()
+        let focus_handle = self.focus_handle.clone();
+        let entity = cx.entity().clone();
+
+        let content = div()
             .size_full()
             .bg(rgb(0x1e1e2e))
             .flex()
@@ -447,21 +451,7 @@ impl Render for BattoApp {
                                     this.arg_cursor_pos += 1;
                                 }
                             }
-                            _ => {
-                                if let Some(ch) = event.keystroke.key_char.as_ref() {
-                                    if ch.chars().all(|c| !c.is_control()) {
-                                        if is_literal {
-                                            this.arg_search.push_str(ch);
-                                            this.arg_choice_idx = 0;
-                                        } else {
-                                            if let Some(val) = this.arg_values.get_mut(this.active_arg_index) {
-                                                val.insert_str(this.arg_cursor_pos, ch);
-                                                this.arg_cursor_pos += ch.len();
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                            _ => {}
                         }
                         cx.notify();
                         return;
@@ -548,31 +538,7 @@ impl Render for BattoApp {
                             this.cursor_pos = this.query.len();
                             cx.notify();
                         }
-                        _ => {
-                            if let Some(ch) = event.keystroke.key_char.as_ref() {
-                                if ch == "/"
-                                    && this.query.is_empty()
-                                    && !this.all_commands.is_empty()
-                                {
-                                    this.mode = Mode::Command;
-                                    this.query.insert(this.cursor_pos, '/');
-                                    this.cursor_pos += 1;
-                                    this.update_results();
-                                    cx.notify();
-                                } else if ch == "=" && this.query.is_empty() {
-                                    this.mode = Mode::Calculator;
-                                    this.query.insert(this.cursor_pos, '=');
-                                    this.cursor_pos += 1;
-                                    this.update_results();
-                                    cx.notify();
-                                } else if ch.chars().all(|c| !c.is_control()) {
-                                    this.query.insert_str(this.cursor_pos, ch);
-                                    this.cursor_pos += ch.len();
-                                    this.update_results();
-                                    cx.notify();
-                                }
-                            }
-                        }
+                        _ => {}
                     }
                 },
             ))
@@ -594,7 +560,111 @@ impl Render for BattoApp {
                 Mode::Calculator => {
                     render_calculator(&query, &calc_result).into_any_element()
                 }
-            })
+            });
+
+        InputHandlerWrapper {
+            child: content.into_any_element(),
+            focus_handle,
+            entity,
+        }
+    }
+}
+
+impl EntityInputHandler for BattoApp {
+    fn text_for_range(
+        &mut self,
+        range: Range<usize>,
+        _adjusted_range: &mut Option<Range<usize>>,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) -> Option<String> {
+        Some(self.query[range].to_string())
+    }
+
+    fn selected_text_range(
+        &mut self,
+        _ignore_disabled_input: bool,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) -> Option<UTF16Selection> {
+        let utf16_cursor = self.query[..self.cursor_pos].encode_utf16().count();
+        Some(UTF16Selection {
+            range: utf16_cursor..utf16_cursor,
+            reversed: false,
+        })
+    }
+
+    fn marked_text_range(
+        &self,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) -> Option<Range<usize>> {
+        None
+    }
+
+    fn unmark_text(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {}
+
+    fn replace_text_in_range(
+        &mut self,
+        _range: Option<Range<usize>>,
+        text: &str,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.filling_args {
+            let is_literal = self.filtered_commands.first()
+                .and_then(|c| c.args.get(self.active_arg_index))
+                .map(|a| a.arg_type == "literal" && !a.choices.is_empty())
+                .unwrap_or(false);
+            if is_literal {
+                self.arg_search.push_str(text);
+                self.arg_choice_idx = 0;
+            } else if let Some(val) = self.arg_values.get_mut(self.active_arg_index) {
+                val.insert_str(self.arg_cursor_pos, text);
+                self.arg_cursor_pos += text.len();
+            }
+            cx.notify();
+            return;
+        }
+
+        if text.starts_with('/') && self.query.is_empty() && !self.all_commands.is_empty() {
+            self.mode = Mode::Command;
+        } else if text.starts_with('=') && self.query.is_empty() {
+            self.mode = Mode::Calculator;
+        }
+        self.query.insert_str(self.cursor_pos, text);
+        self.cursor_pos += text.len();
+        self.update_results();
+        cx.notify();
+    }
+
+    fn replace_and_mark_text_in_range(
+        &mut self,
+        _range: Option<Range<usize>>,
+        _new_text: &str,
+        _new_selected_range: Option<Range<usize>>,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) {
+    }
+
+    fn bounds_for_range(
+        &mut self,
+        _range_utf16: Range<usize>,
+        _element_bounds: Bounds<Pixels>,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) -> Option<Bounds<Pixels>> {
+        None
+    }
+
+    fn character_index_for_point(
+        &mut self,
+        _point: Point<Pixels>,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) -> Option<usize> {
+        None
     }
 }
 
@@ -969,4 +1039,72 @@ fn render_arg_form(
     }
 
     form
+}
+
+struct InputHandlerWrapper<V: EntityInputHandler> {
+    child: AnyElement,
+    focus_handle: FocusHandle,
+    entity: Entity<V>,
+}
+
+impl<V: EntityInputHandler + 'static> Element for InputHandlerWrapper<V> {
+    type RequestLayoutState = ();
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, Self::RequestLayoutState) {
+        let layout_id = self.child.request_layout(window, cx);
+        (layout_id, ())
+    }
+
+    fn prepaint(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
+        _bounds: Bounds<Pixels>,
+        _request_layout: &mut Self::RequestLayoutState,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        self.child.prepaint(window, cx);
+    }
+
+    fn paint(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        _request_layout: &mut Self::RequestLayoutState,
+        _prepaint: &mut Self::PrepaintState,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        self.child.paint(window, cx);
+        window.handle_input(
+            &self.focus_handle,
+            ElementInputHandler::new(bounds, self.entity.clone()),
+            cx,
+        );
+    }
+}
+
+impl<V: EntityInputHandler + 'static> IntoElement for InputHandlerWrapper<V> {
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element {
+        self
+    }
 }
