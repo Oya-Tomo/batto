@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 pub mod app_launch;
+pub mod calculator;
 pub mod dispatch;
 
 pub trait Command: Send + Sync {

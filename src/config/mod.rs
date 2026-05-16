@@ -10,6 +10,10 @@ fn config_dir() -> PathBuf {
     dirs::config_dir().expect("cannot determine config directory").join("batto")
 }
 
+pub fn plugins_dir() -> PathBuf {
+    config_dir().join("plugins")
+}
+
 fn init_lua_path() -> PathBuf {
     config_dir().join("init.lua")
 }
@@ -34,12 +38,12 @@ pub fn load_config() -> types::AppConfig {
         })
 }
 
-pub fn load_config_and_commands() -> (types::AppConfig, Vec<types::UserCommand>) {
+pub fn load_config_and_commands() -> (types::AppConfig, Vec<types::UserCommand>, Vec<types::QueryHandlerInfo>) {
     let path = ensure_config();
     lua_engine::parse_config(&path)
-        .map(|out| (out.config, out.commands))
+        .map(|out| (out.config, out.commands, out.query_handlers))
         .unwrap_or_else(|e| {
             eprintln!("warning: failed to parse config: {e}");
-            (types::AppConfig::default(), Vec::new())
+            (types::AppConfig::default(), Vec::new(), Vec::new())
         })
 }

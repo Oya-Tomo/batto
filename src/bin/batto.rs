@@ -6,11 +6,12 @@ fn main() {
         daemon::start_daemon();
     }
 
-    let (cfg, all_apps, commands) = match daemon::request_all() {
-        Ok(data) => (data.config, data.apps, data.commands),
+    let (cfg, all_apps, commands, query_handlers) = match daemon::request_all() {
+        Ok(data) => (data.config, data.apps, data.commands, data.query_handlers),
         Err(_) => (
             config::load_config(),
             discovery::discover_apps(),
+            Vec::new(),
             Vec::new(),
         ),
     };
@@ -39,7 +40,7 @@ fn main() {
                 let focus_handle = cx.focus_handle();
                 cx.new(|cx| {
                     cx.focus_self(_window);
-                    BattoApp::new(cfg.clone(), all_apps.clone(), commands.clone(), focus_handle)
+                    BattoApp::new(cfg.clone(), all_apps.clone(), commands.clone(), query_handlers.clone(), focus_handle)
                 })
             },
         )

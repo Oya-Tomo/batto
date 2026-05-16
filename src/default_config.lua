@@ -27,5 +27,6 @@
 --   exec = "xdg-open 'https://google.com/search?q={{args}}'",
 -- })
 
--- Plugins:
--- batto.use("plugins/my_plugin")
+-- Plugins (place in ~/.config/batto/plugins/<name>/init.lua):
+-- batto.use("web-search")
+-- batto.use("notion")

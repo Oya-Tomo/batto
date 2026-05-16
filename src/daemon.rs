@@ -4,7 +4,8 @@ use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use crate::config::types::{AppConfig, UserCommand};
+use crate::config::lua_engine::LuaRuntime;
+use crate::config::types::{AppConfig, QueryHandlerInfo, UserCommand};
 use crate::discovery::types::AppEntry;
 
 fn runtime_dir() -> PathBuf {
@@ -129,6 +130,7 @@ pub struct DaemonData {
     pub config: AppConfig,
     pub apps: Vec<AppEntry>,
     pub commands: Vec<UserCommand>,
+    pub query_handlers: Vec<QueryHandlerInfo>,
 }
 
 pub fn request_all() -> Result<DaemonData, String> {
@@ -145,19 +147,47 @@ pub fn request_all() -> Result<DaemonData, String> {
     serde_json::from_slice(&buf).map_err(|e| e.to_string())
 }
 
+pub fn request_query(prefix: &str, query: &str) -> Result<Vec<crate::config::types::QueryResult>, String> {
+    let mut stream = UnixStream::connect(socket_path()).map_err(|e| e.to_string())?;
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .map_err(|e| e.to_string())?;
+
+    let msg = format!("query:{prefix}:{query}");
+    stream.write_all(msg.as_bytes()).map_err(|e| e.to_string())?;
+
+    let mut buf = Vec::new();
+    stream.read_to_end(&mut buf).map_err(|e| e.to_string())?;
+
+    serde_json::from_slice(&buf).map_err(|e| e.to_string())
+}
+
 // --- Daemon server ---
 
 pub fn run_daemon() {
     let dir = runtime_dir();
     std::fs::create_dir_all(&dir).ok();
 
-    let (config, commands) = crate::config::load_config_and_commands();
+    let config_path = crate::config::ensure_config();
+    let mut lua_runtime = match LuaRuntime::new(&config_path) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("daemon: failed to parse config: {e}");
+            return;
+        }
+    };
+    let output = lua_runtime.output();
     let mut apps = crate::discovery::discover_apps();
 
     let history = load_history();
     sort_by_history(&mut apps, &history);
 
-    let data = DaemonData { config, apps, commands };
+    let data = DaemonData {
+        config: output.config.clone(),
+        apps,
+        commands: output.commands.clone(),
+        query_handlers: output.query_handlers.clone(),
+    };
     let cache_path = dir.join("cache.json");
     if let Ok(json) = serde_json::to_string(&data) {
         let _ = std::fs::write(&cache_path, json);
@@ -176,23 +206,38 @@ pub fn run_daemon() {
         }
     };
 
-    let rescan_cache = cache_path.clone();
+    // Rescan writes to a flag file; main thread picks it up
+    let rescan_flag = dir.join(".rescan");
+    let rescan_flag_clone = rescan_flag.clone();
     std::thread::spawn(move || loop {
         std::thread::sleep(Duration::from_secs(300));
-        let (config, commands) = crate::config::load_config_and_commands();
-        let mut apps = crate::discovery::discover_apps();
-        let history = load_history();
-        sort_by_history(&mut apps, &history);
-        let data = DaemonData { config, apps, commands };
-        if let Ok(json) = serde_json::to_string(&data) {
-            let _ = std::fs::write(&rescan_cache, json);
-        }
+        let _ = std::fs::write(&rescan_flag_clone, "1");
     });
 
     for stream in listener.incoming() {
+        // Check rescan flag
+        if rescan_flag.exists() {
+            let _ = std::fs::remove_file(&rescan_flag);
+            if lua_runtime.reload(&config_path).is_ok() {
+                let out = lua_runtime.output();
+                let mut new_apps = crate::discovery::discover_apps();
+                let h = load_history();
+                sort_by_history(&mut new_apps, &h);
+                let data = DaemonData {
+                    config: out.config.clone(),
+                    apps: new_apps,
+                    commands: out.commands.clone(),
+                    query_handlers: out.query_handlers.clone(),
+                };
+                if let Ok(json) = serde_json::to_string(&data) {
+                    let _ = std::fs::write(&cache_path, &json);
+                }
+            }
+        }
+
         match stream {
             Ok(mut stream) => {
-                let mut buf = [0u8; 256];
+                let mut buf = [0u8; 4096];
                 if let Ok(n) = stream.read(&mut buf) {
                     let cmd = String::from_utf8_lossy(&buf[..n]).to_string();
                     if cmd == "ping" {
@@ -204,19 +249,35 @@ pub fn run_daemon() {
                             let _ = stream.write_all(b"{}");
                         }
                     } else if cmd == "rescan" {
-                        let (config, commands) = crate::config::load_config_and_commands();
-                        let mut apps = crate::discovery::discover_apps();
-                        let history = load_history();
-                        sort_by_history(&mut apps, &history);
-                        let data = DaemonData { config, apps, commands };
-                        if let Ok(json) = serde_json::to_string(&data) {
-                            let _ = std::fs::write(&cache_path, &json);
-                            let _ = stream.write_all(b"ok");
+                        if lua_runtime.reload(&config_path).is_ok() {
+                            let out = lua_runtime.output();
+                            let mut new_apps = crate::discovery::discover_apps();
+                            let h = load_history();
+                            sort_by_history(&mut new_apps, &h);
+                            let data = DaemonData {
+                                config: out.config.clone(),
+                                apps: new_apps,
+                                commands: out.commands.clone(),
+                                query_handlers: out.query_handlers.clone(),
+                            };
+                            if let Ok(json) = serde_json::to_string(&data) {
+                                let _ = std::fs::write(&cache_path, &json);
+                                let _ = stream.write_all(b"ok");
+                            }
                         }
                     } else if let Some(name) = cmd.strip_prefix("launch:") {
                         record_launch(&mut history, name.trim());
                         save_history(&history);
                         let _ = stream.write_all(b"ok");
+                    } else if let Some(rest) = cmd.strip_prefix("query:") {
+                        // Format: query:<prefix>:<text>
+                        let (prefix, text) = rest.split_once(':').unwrap_or((rest, ""));
+                        let results = lua_runtime.query(prefix, text);
+                        if let Ok(json) = serde_json::to_string(&results) {
+                            let _ = stream.write_all(json.as_bytes());
+                        } else {
+                            let _ = stream.write_all(b"[]");
+                        }
                     } else {
                         let _ = stream.write_all(b"unknown");
                     }

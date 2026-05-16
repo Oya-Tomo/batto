@@ -9,7 +9,7 @@ pub fn fuzzy_match<'a>(entries: &'a [AppEntry], query: &str) -> Vec<&'a AppEntry
     }
 
     let mut matcher = Matcher::default();
-    let pattern = Pattern::parse(query, CaseMatching::Smart, Normalization::Smart);
+    let pattern = Pattern::parse(query, CaseMatching::Ignore, Normalization::Smart);
 
     let mut scored: Vec<(u32, &AppEntry)> = entries
         .iter()

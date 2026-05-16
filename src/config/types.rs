@@ -42,10 +42,30 @@ pub struct CommandArg {
     pub required: bool,
     #[serde(rename = "type", default = "default_arg_type")]
     pub arg_type: String,
+    #[serde(default)]
+    pub choices: Vec<ArgChoice>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArgChoice {
+    pub name: String,
+    pub value: String,
 }
 
 fn default_arg_type() -> String {
     "string".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QueryHandlerInfo {
+    pub prefix: String,
+    pub description: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QueryResult {
+    pub title: String,
+    pub exec: String,
 }
 
 impl Default for AppConfig {
