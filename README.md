@@ -9,8 +9,8 @@ Raycast-like application launcher for Linux, built with Rust and GPUI.
 - Slash commands with argument forms
 - Plugin system (Lua)
 - Calculator mode (`=2+3`)
-- Dynamic query handlers (`batto.on_query`)
-- Japanese/IME input support
+- Dynamic query handlers
+- `.env` file support for secrets
 - Configurable keybindings
 
 ## Requirements
@@ -37,8 +37,7 @@ Installs `batto` and `battod` to `~/.cargo/bin/`. First launch is slightly slowe
 4. Fill in:
    - **Name**: `batto`
    - **Command**: `batto`
-   - **Shortcut**: press your desired key (e.g. `Ctrl+Space`)
-   - **Shortcut**: press your desired key (e.g. `Ctrl+Space`)
+   - **Shortcut**: press your desired key (e.g. `Ctrl+@`)
 
 ### GNOME (CLI)
 
@@ -53,7 +52,7 @@ gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/or
   command 'batto'
 
 gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/ \
-  binding '<Super>space'
+  binding '<Ctrl>at'
 ```
 
 ### i3 / Sway
@@ -65,7 +64,7 @@ bindsym $mod+d exec batto
 ### Hyprland
 
 ```
-bind = SUPER, space, exec, batto
+bind = CTRL, at, exec, batto
 ```
 
 ## Uninstall
@@ -106,96 +105,7 @@ Place plugins in `~/.config/batto/plugins/<name>/init.lua` and enable them:
 batto.use("discord")
 ```
 
-### Plugin API
-
-**Register a command with `exec` template:**
-
-```lua
-batto.command({
-  name = "hello",
-  description = "Say hello",
-  args = {
-    { name = "target", required = true, type = "string" },
-    {
-      name = "greeting",
-      type = "literal",
-      choices = {
-        { name = "Hello", value = "hello" },
-        { name = "Hi", value = "hi" },
-      },
-    },
-  },
-  exec = "echo '{{greeting}} {{target}}'",
-})
-```
-
-Argument types: `string`, `literal` (selectable from choices).
-
-**Register a command with `handler` (dynamic results):**
-
-```lua
-batto.command({
-  name = "gg",
-  description = "Google search",
-  handler = function(query)
-    return {
-      { title = "Search: " .. query,
-        exec = "xdg-open 'https://google.com/search?q=" .. query .. "'" },
-    }
-  end,
-})
-```
-
-**Command with `args` + `handler`:**
-
-```lua
-batto.command({
-  name = "discord",
-  description = "Send Discord message",
-  args = {
-    { name = "channel", required = true, type = "literal",
-      choices = { { name = "General", value = "https://..." } } },
-    { name = "message", required = true, type = "string" },
-  },
-  handler = function(args)
-    return {
-      { title = "Send: " .. args.message,
-        exec = "curl -s -X POST '" .. args.channel .. "' -H 'Content-Type: application/json' -d '{\"content\":\"" .. args.message .. "\"}'" },
-    }
-  end,
-})
-```
-
-- `args` + `exec`: arg form shown, template substitution on submit
-- `args` + `handler`: arg form shown, handler called with `{name=value}` table on submit
-- No `args` + `handler`: handler called with query text on each keystroke (dynamic search)
-- No `args` + `exec`: run on submit
-
-**HTTP request:**
-
-```lua
-local body = batto.fetch("https://api.example.com/data")
-local body = batto.fetch("https://api.example.com/data", {
-  method = "POST",
-  headers = { ["Content-Type"] = "application/json" },
-  body = '{"key": "value"}',
-})
-```
-
-**JSON and env:**
-
-```lua
-local data = batto.json_decode(body)
-local json = batto.json_encode({ key = "value" })
-local token = batto.env("MY_API_TOKEN")
-```
-
-Secrets like API tokens can be stored in `~/.config/batto/.env`:
-
-```
-MY_API_TOKEN=secret123
-DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
-```
+Available APIs: `batto.setup()`, `batto.command()`, `batto.use()`, `batto.fetch()`, `batto.json_decode()`, `batto.json_encode()`, `batto.env()`. See [Lua API Reference](docs/lua-api.md) for details.
 
 ## Built-in commands
 
