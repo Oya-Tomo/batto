@@ -197,10 +197,6 @@ impl BattoApp {
         self.query.char_indices().nth(char_idx).map(|(i, _)| i).unwrap_or(self.query.len())
     }
 
-    fn char_pos(&self, byte_idx: usize) -> usize {
-        self.query[..byte_idx].chars().count()
-    }
-
     fn search_term(&self) -> &str {
         if self.mode == Mode::Command && self.query.starts_with('/') {
             &self.query[1..]
@@ -270,7 +266,7 @@ impl BattoApp {
                         return;
                     }
                     if cmd.name == "reload" {
-                        crate::daemon::request_rescan();
+                        let _ = crate::daemon::request_rescan();
                         if let Ok(data) = crate::daemon::request_all() {
                             self.all_apps = data.apps;
                             self.all_commands = data.commands;
@@ -441,7 +437,7 @@ impl Focusable for BattoApp {
 }
 
 impl Render for BattoApp {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let icon_size = self.config.window.icon_size as f32;
         let mode = self.mode;
         let query = self.query.clone();

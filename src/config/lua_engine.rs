@@ -288,7 +288,7 @@ fn register_batto_apis(lua: &Lua, batto_table: &Table) -> Result<(), Box<dyn std
     Ok(())
 }
 
-fn extract_output(lua: &Lua, globals: &mlua::Table) -> Result<LuaOutput, Box<dyn std::error::Error>> {
+fn extract_output(_lua: &Lua, globals: &mlua::Table) -> Result<LuaOutput, Box<dyn std::error::Error>> {
     let config = if let Ok(tbl) = globals.get::<Table>("_batto_config") {
         let mut config = AppConfig::default();
 
