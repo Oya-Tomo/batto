@@ -4,7 +4,7 @@
 ---@field width number Window width in pixels (default: 600)
 ---@field list_height number List area height in pixels (default: 300)
 ---@field icon_size number App icon size in pixels (default: 48)
----@field show_name boolean Show app name below icon (default: true)
+---@field hide_on_blur boolean Quit when window loses focus (default: true)
 
 ---@class batto.KeysConfig
 ---@field accept string Key binding for accept (default: "enter")
