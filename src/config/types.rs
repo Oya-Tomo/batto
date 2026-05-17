@@ -13,6 +13,7 @@ pub struct WindowConfig {
     pub width: u32,
     pub list_height: u32,
     pub icon_size: u32,
+    pub hide_on_blur: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -79,6 +80,7 @@ impl Default for WindowConfig {
             width: 600,
             list_height: 300,
             icon_size: 48,
+            hide_on_blur: true,
         }
     }
 }

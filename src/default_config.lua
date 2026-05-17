@@ -6,7 +6,7 @@
 --     width = 600,
 --     list_height = 300,
 --     icon_size = 48,
---     show_name = true,   -- show app name below icon
+--     hide_on_blur = true, -- hide window when focus is lost
 --   },
 --   keys = {
 --     accept = "enter",

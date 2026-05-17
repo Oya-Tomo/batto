@@ -35,6 +35,8 @@ pub struct BattoApp {
     arg_search: String,
     arg_choice_idx: usize,
     scroll_handle: ScrollHandle,
+    #[allow(dead_code)]
+    blur_subscription: Option<Subscription>,
 }
 
 impl BattoApp {
@@ -43,7 +45,19 @@ impl BattoApp {
         all_apps: Vec<AppEntry>,
         all_commands: Vec<UserCommand>,
         focus_handle: FocusHandle,
+        window: &mut Window,
+        cx: &mut Context<Self>,
     ) -> Self {
+        let hide_on_blur = config.window.hide_on_blur;
+        let blur_subscription = if hide_on_blur {
+            let handle = focus_handle.clone();
+            Some(cx.on_blur(&handle, window, |_, _, cx| {
+                cx.quit();
+            }))
+        } else {
+            None
+        };
+
         let filtered_apps = all_apps.clone();
         Self {
             query: String::new(),
@@ -66,6 +80,7 @@ impl BattoApp {
             arg_search: String::new(),
             arg_choice_idx: 0,
             scroll_handle: ScrollHandle::new(),
+            blur_subscription,
         }
     }
 

@@ -40,7 +40,7 @@ fn main() {
                 let focus_handle = cx.focus_handle();
                 cx.new(|cx| {
                     cx.focus_self(_window);
-                    BattoApp::new(cfg.clone(), all_apps.clone(), commands.clone(), focus_handle)
+                    BattoApp::new(cfg.clone(), all_apps.clone(), commands.clone(), focus_handle, _window, cx)
                 })
             },
         )
